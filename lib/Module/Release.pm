@@ -11,13 +11,13 @@ has been split out like this so that there can be in the future.
 
 =head1 VERSION
 
-Version 0.20
+Version 0.22
 
-    $Header: /cvsroot/brian-d-foy/release/lib/Module/Release.pm,v 1.3 2003/03/27 05:17:04 petdance Exp $
+    $Header: /cvsroot/brian-d-foy/release/lib/Module/Release.pm,v 1.16 2003/04/10 03:20:21 petdance Exp $
 
 =cut
 
-our $VERSION = '0.20';
+our $VERSION = '0.22';
 
 use strict;
 use Config;
@@ -27,6 +27,7 @@ use LWP::UserAgent;
 use HTTP::Cookies;
 use HTTP::Request;
 use Net::FTP;
+use File::Spec;
 
 use constant DASHES => "-" x 73;
 
@@ -35,11 +36,15 @@ use constant DASHES => "-" x 73;
 Create a Module::Release object.  Any arguments passed are assumed to
 be key-value pairs that override the default values.
 
+At this point, the C<new()> method is not overridable via the
+C<release_subclass> config file entry.  It would be nice to fix this
+sometime.
+
 =cut
 
 sub new {
     my ($class, %params) = @_;
-    my $self = bless {
+    my $self = {
 			make => $Config{make},
 			perl => $ENV{PERL} || $^X,
 			conf => '.releaserc',
@@ -47,12 +52,22 @@ sub new {
 			local => undef,
 			remote => undef,
 			%params,
-		    }, $class;
+	       };
 
     # Read the configuration
     die "Could not find conf file $self->{conf}\n" unless -e $self->{conf};
     my $config = $self->{config} = ConfigReader::Simple->new( $self->{conf} );
     die "Could not get configuration data\n" unless ref $config;
+
+    # See whether we should be using a subclass
+    if (my $subclass = $config->release_subclass) {
+	unless (UNIVERSAL::can($subclass, 'new')) {
+	    require File::Spec->catfile( split '::', $subclass ) . '.pm';
+	}
+	bless $self, $subclass;
+    } else {
+	bless $self, $class;
+    }
 
     # Figure out options
     $self->{cpan} = $config->cpan_user eq '<none>' ? 0 : 1;
@@ -81,13 +96,6 @@ sub new {
 	print "Uploading to the CPAN only\n";
     }
   
-    # Make sure we have the right passwords
-    if ( $self->{cpan} ) {
-	$self->{cpan_pass} = $self->getpass( "CPAN_PASS" );
-    }
-    if ( $self->{sf} ) {
-	$self->{sf_pass} = $self->getpass( "SF_PASS" );
-    }
 
     # Set up the browser
     $self->{ua}      = LWP::UserAgent->new( agent => 'Mozilla/4.5' );
@@ -100,8 +108,12 @@ sub new {
     return $self;
 }
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# clean up the directory to get rid of old versions
+=head2 clean()
+
+Clean up the directory to get rid of old versions
+
+=cut
+
 sub clean {
     my $self = shift;
     print "Cleaning directory... ";
@@ -118,9 +130,13 @@ sub clean {
     print $messages, DASHES, "\n" if $self->{debug};
 } # clean
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# clean up the directory to get rid of old versions
-sub perl {
+=head2 C<build_makefile()>
+
+Builds the makefile from Makefile.PL
+
+=cut
+
+sub build_makefile {
     my $self = shift;
     print "Recreating make file... ";
 
@@ -136,8 +152,12 @@ sub perl {
     print $messages, DASHES, "\n" if $self->{debug};
 } # perl
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# check the tests, which must all pass
+=head2 C<test()>
+
+Check the tests, which must all pass
+
+=cut
+
 sub test {
     my $self = shift;
     print "Checking make test... ";
@@ -157,8 +177,12 @@ sub test {
     print $tests, DASHES, "\n" if $self->{debug};
 } # test
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# XXX: make the distribution
+=head2 C<dist()>
+
+Make the distribution
+
+=cut
+
 sub dist {
     my $self = shift;
     print "Making dist... ";
@@ -168,16 +192,16 @@ sub dist {
         return;
     }
 
-    my $messages = $self->run( "$self->{make} tardist 2>&1" );
+    my $messages = $self->run( "$self->{make} dist 2>&1" );
 
     unless( $self->{local} ){
         print ", guessing local distribution name" if $self->{debug};
-        ($self->{local}) = $messages =~ /^\s*gzip.+?\b(\S+\.tar)\s*$/m;
+        ($self->{local}) = $messages =~ /^\s*gzip.+?\b'?(\S+\.tar)'?\s*$/m;
         $self->{local} .= '.gz';
         $self->{remote} = $self->{local};
     }
 
-    die "Couldn't guess distname from tardist output\n" unless $self->{local};
+    die "Couldn't guess distname from dist output\n" unless $self->{local};
     die "Local file '$self->{local}' does not exist\n" unless -f $self->{local};
 
     print "done\n";
@@ -185,8 +209,12 @@ sub dist {
     print $messages, DASHES, "\n" if $self->{debug};
 } # dist
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# XXX: check the distribution test
+=head2 C<dist_test()>
+
+Check the distribution test
+
+=cut
+
 sub dist_test {
     my $self = shift;
     print "Checking disttest... ";
@@ -206,11 +234,15 @@ sub dist_test {
     print $tests, DASHES, "\n" if $self->{debug};
 } # dist_test
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# check the state of the CVS repository
-sub cvs {
+=head2 C<check_cvs()>
+
+Check the state of the CVS repository
+
+=cut
+
+sub check_cvs {
     my $self = shift;
-    last CVS unless -d 'CVS';
+    return unless -d 'CVS';
 
     print "Checking state of CVS... ";
 
@@ -272,8 +304,30 @@ sub cvs {
     print join("\n", @cvs_update, "\n"), DASHES, "\n" if $self->{debug};
 } # cvs
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# upload the files to the FTP servers
+=head2 C<check_for_passwords()>
+
+Makes sure that C<cpan_pass> and C<sf_pass> members are populated,
+as appropriate.  This function must die if the calling program is
+not able to continue.
+
+=cut
+
+sub check_for_passwords {
+    my $self = shift;
+
+    if ( $self->{cpan} ) {
+	$self->{cpan_pass} = $self->getpass( "CPAN_PASS" );
+    }
+    if ( $self->{sf} ) {
+	$self->{sf_pass} = $self->getpass( "SF_PASS" );
+    }
+}
+
+=head2 C<ftp_upload()>
+
+Upload the files to the FTP servers
+
+=cut
 
 sub ftp_upload {
     my $self = shift;
@@ -295,22 +349,42 @@ sub ftp_upload {
     print "Will use passive FTP transfers\n" if $self->{passive_ftp} && $self->{debug};
 
 
+    my $local_file = $self->{local};
+    my $local_size = -s $local_file;
     foreach my $site ( @Sites ) {
-        print "Uploading to $site\n";
-        my $ftp = Net::FTP->new( $site, Debug => $self->{debug}, Passive => $self->{passive_ftp} );
+        print "Logging in to $site\n";
+        my $ftp = Net::FTP->new( $site, Hash => \*STDOUT, Debug => $self->{debug}, Passive => $self->{passive_ftp} )
+	    or die "Couldn't open FTP connection to $site: $@";
 
-        $ftp->login( "anonymous", $config->cpan_user . '@cpan.org' );
+	my $email = ($config->cpan_user || "anonymous") . '@cpan.org';
+        $ftp->login( "anonymous", $email )
+	    or die "Couldn't log in anonymously to $site";
+
         $ftp->pasv if $self->{passive_ftp};
         $ftp->binary;
-        $ftp->cwd( "/incoming" );
-        $ftp->put( $self->{local}, $self->{remote} );
+
+        $ftp->cwd( "/incoming" )
+	    or die "Couldn't chdir to /incoming";
+
+	print "Putting $local_file\n";
+        my $remote_file = $ftp->put( $self->{local}, $self->{remote} );
+	die "PUT failed: $@\n" if $remote_file ne $self->{remote};
+
+	my $remote_size = $ftp->size( $self->{remote} );
+	if ( $remote_size != $local_size ) {
+	    warn "WARNING: Uploaded file is $remote_size bytes, but local file is $local_size bytes";
+	}
 
         $ftp->quit;
     }
 } # ftp_upload
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# claim the file in PAUSE
+=head2 C<pause_claim()>
+
+Claim the file in PAUSE
+
+=cut
+
 sub pause_claim {
     my $self = shift;
     return unless $self->{cpan};
@@ -338,13 +412,17 @@ sub pause_claim {
             "\n";
 } # pause_claim
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# tag the release
+=head2 C<cvs_tag()>
+
+Tag the release in local CVS
+
+=cut
+
 sub cvs_tag {
     my $self = shift;
-    my $file = $self->{remote};
-    my( $major, $minor ) = $file =~ /(\d+) \. (\d+(?:_\d+)?) (?:\. tar \. gz)? $/xg;
-    my $tag = "RELEASE_${major}_$minor";
+    return unless -d 'CVS';
+
+    my $tag = $self->make_cvs_tag;
     print "Tagging release with $tag\n";
 
     system 'cvs', 'tag', $tag;
@@ -359,15 +437,30 @@ sub cvs_tag {
 
 } # cvs_tag
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# Do the SourceForge.net stuff
+=head2 C<make_cvs_tag()>
+
+By default, examines the name of the remote file
+(i.e. F<Foo-Bar-0.04.tar.gz>) and constructs a CVS tag like
+C<RELEASE_0_04> from it.  Override this method if you want to use a
+different tagging scheme.
+
+=cut
+
+sub make_cvs_tag {
+    my $self = shift;
+    my( $major, $minor ) = $self->{remote} =~ /(\d+) \. (\d+(?:_\d+)?) (?:\. tar \. gz)? $/xg;
+    return "RELEASE_${major}_${minor}";
+}
 
 # SourceForge.net seems to know our path through the system
 # Hit all the pages, collect the right cookies, etc
 
-########################################################################
-# authenticate
+=head2 C<sf_login()>
+
+Authenticate with Sourceforge
+
+=cut
+
 sub sf_login {
     my $self = shift;
     return unless $self->{sf};
@@ -424,8 +517,12 @@ sub sf_login {
     }
 } # sf_login
 
-########################################################################
-# visit the Quick Release System form
+=head2 C<sf_qrs()>
+
+Visit the Quick Release System form
+
+=cut
+
 sub sf_qrs {
     my $self = shift;
     return unless $self->{sf};
@@ -440,8 +537,12 @@ sub sf_qrs {
     $self->{cookies}->extract_cookies( $response );
 } # sf_qrs
 
-########################################################################
-# release the file
+=head2 C<sf_release()>
+
+Release the file
+
+=cut
+
 sub sf_release {
     my $self = shift;
     return unless $self->{sf};
@@ -487,6 +588,12 @@ sub sf_release {
     print "File Released\n";
 } # sf_release
 
+=head2 C<get_readme()>
+
+Read and parse the F<README> file.  This is pretty specific, so
+you may well want to overload it.
+
+=cut
 
 sub get_readme {
         open my $fh, '<README' or return '';
@@ -496,6 +603,13 @@ sub get_readme {
         };
         return $data;
 }
+
+=head2 C<get_changes()>
+
+Read and parse the F<Changes> file.  This is pretty specific, so
+you may well want to overload it.
+
+=cut
 
 sub get_changes {
         open my $fh, '<Changes' or return '';
@@ -509,11 +623,23 @@ sub get_changes {
         return $data;
 }
 
+=head2 C<run()>
+
+Run a command in the shell.
+
+=cut
+
 sub run {
     my ($self, $command) = @_;
     print "$command\n" if $self->{debug};
     return `$command`;
 };
+
+=head2 C<getpass()>
+
+Get a password from the user if it isn't found.
+
+=cut
 
 sub getpass {
     my ($self, $field) = @_;

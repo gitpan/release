@@ -1,4 +1,4 @@
-# $Id: pod.t,v 1.5 2003/03/27 04:51:02 petdance Exp $
+# $Id: pod.t,v 1.6 2003/03/29 21:48:05 petdance Exp $
 
 BEGIN {
     @pods = qw(
@@ -10,9 +10,8 @@ BEGIN {
 use Test::More tests => scalar @pods;
 
 SKIP: {
-    eval "use Test::Pod;";
-    $bad = ( $@ || ($Test::Pod::VERSION < '0.95') );
-    skip "Test::Pod 0.95 not installed", scalar @pods if $bad;
+    eval "use Test::Pod 0.95";
+    skip "Test::Pod 0.95 not installed", scalar @pods if $@;
     pod_file_ok($_) for @pods;
 }
 
