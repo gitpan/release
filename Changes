@@ -1,4 +1,8 @@
-$Id: Changes,v 1.22 2003/04/09 21:05:48 petdance Exp $
+$Id: Changes,v 1.23 2003/06/23 04:44:16 petdance Exp $
+
+0.23 - Sun Jun 22 23:40:00 2003 (Andy Lester)
+        * All output now goes to the screen if --debug is on.  Thanks to
+          Ken Williams.  "High school students."
 
 0.22 - Wed Apr  9 16:05:08 2003 (Andy Lester)
 	* release will not run if there are any switch errors

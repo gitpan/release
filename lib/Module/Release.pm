@@ -13,11 +13,11 @@ has been split out like this so that there can be in the future.
 
 Version 0.22
 
-    $Header: /cvsroot/brian-d-foy/release/lib/Module/Release.pm,v 1.16 2003/04/10 03:20:21 petdance Exp $
+    $Header: /cvsroot/brian-d-foy/release/lib/Module/Release.pm,v 1.19 2003/06/23 04:44:16 petdance Exp $
 
 =cut
 
-our $VERSION = '0.22';
+our $VERSION = '0.23';
 
 use strict;
 use Config;
@@ -72,7 +72,7 @@ sub new {
     # Figure out options
     $self->{cpan} = $config->cpan_user eq '<none>' ? 0 : 1;
     $self->{sf}   = $config->sf_user   eq '<none>' ? 0 : 1;
-    $self->{passive_ftp} = $config->passive_ftp =~ /^y(es)?/ ? 1 : 0;
+    $self->{passive_ftp} = ($config->passive_ftp && $config->passive_ftp =~ /^y(es)?/) ? 1 : 0;
 
     my @required = qw( sf_user cpan_user );
     push( @required, qw( sf_group_id sf_package_id ) ) if $self->{sf};
@@ -123,11 +123,10 @@ sub clean {
         return;
     }
 
-    my $messages = $self->run( "$self->{make} realclean 2>&1" );
+    $self->run( "$self->{make} realclean 2>&1" );
 
     print "done\n";
 
-    print $messages, DASHES, "\n" if $self->{debug};
 } # clean
 
 =head2 C<build_makefile()>
@@ -145,11 +144,9 @@ sub build_makefile {
         return;
     }
 
-    my $messages = $self->run( "$self->{perl} Makefile.PL 2>&1" );
+    $self->run( "$self->{perl} Makefile.PL 2>&1" );
 
     print "done\n";
-
-    print $messages, DASHES, "\n" if $self->{debug};
 } # perl
 
 =head2 C<test()>
@@ -173,8 +170,6 @@ sub test {
             unless $tests =~ /All tests successful/;
 
     print "all tests pass\n";
-
-    print $tests, DASHES, "\n" if $self->{debug};
 } # test
 
 =head2 C<dist()>
@@ -205,8 +200,6 @@ sub dist {
     die "Local file '$self->{local}' does not exist\n" unless -f $self->{local};
 
     print "done\n";
-
-    print $messages, DASHES, "\n" if $self->{debug};
 } # dist
 
 =head2 C<dist_test()>
@@ -230,8 +223,6 @@ sub dist_test {
             unless $tests =~ /All tests successful/;
 
     print "all tests pass\n";
-
-    print $tests, DASHES, "\n" if $self->{debug};
 } # dist_test
 
 =head2 C<check_cvs()>
@@ -246,18 +237,14 @@ sub check_cvs {
 
     print "Checking state of CVS... ";
 
-    my @cvs_update = $self->run( "cvs -n update 2>&1" );
-    chomp( @cvs_update );
+    my $cvs_update = $self->run( "cvs -n update 2>&1" );
 
     if( $? )
             {
-            print join("\n", @cvs_update, "\n"), DASHES, "\n" if $self->{debug};
             die sprintf("\nERROR: cvs failed with non-zero exit status: %d\n\n" .
                     "Aborting release\n", $? >> 8);
             }
 
-    my @cvs_states = qw( C M U P A ? );
-    my %cvs_state;
     my %message    = (
             C   => 'These files have conflicts',
             M   => 'These files have not been checked in',
@@ -266,17 +253,13 @@ sub check_cvs {
             A   => 'These files were added but not checked in',
             '?' => q|I don't know about these files|,
             );
+    my @cvs_states = keys %message;
 
+    my %cvs_state;
     foreach my $state ( @cvs_states ) {
-            my $regex = qr/^\Q$state /;
+        $cvs_state{$state} = [ $cvs_update =~ /^\Q$state\E (.+)/m ];
+    }
 
-            $cvs_state{$state} = [
-                    map { my $x = $_; $x =~ s/$regex//; $x }
-                    grep /$regex/, @cvs_update
-                    ];
-            }
-
-    local $" = "\n\t";
     my $rule = "-" x 50;
     my $count;
     my $question_count;
@@ -287,6 +270,7 @@ sub check_cvs {
             $count += @$list unless $key eq '?';
             $question_count += @$list if $key eq '?';
 
+	    local $" = "\n\t";
             print "\n\t$message{$key}\n\t$rule\n\t@$list\n";
             }
 
@@ -300,8 +284,6 @@ sub check_cvs {
     }
 
     print "CVS up-to-date\n";
-
-    print join("\n", @cvs_update, "\n"), DASHES, "\n" if $self->{debug};
 } # cvs
 
 =head2 C<check_for_passwords()>
@@ -632,7 +614,17 @@ Run a command in the shell.
 sub run {
     my ($self, $command) = @_;
     print "$command\n" if $self->{debug};
-    return `$command`;
+    open my($fh), "$command |" or die $!;
+    my $output = '';
+    local $| = 1;
+    
+    while (<$fh>) {
+        $output .= $_;
+        print if $self->{debug};
+    }
+    print DASHES, "\n" if $self->{debug};
+    
+    return $output;
 };
 
 =head2 C<getpass()>
