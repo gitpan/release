@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# $Id: release,v 1.20 2002/12/11 22:38:20 comdog Exp $
+# $Id: release,v 1.21 2003/03/03 18:05:12 petdance Exp $
 use strict;
 
 use lib qw(/usr/local/src/cpan/build/Crypt-SSLeay-0.45/lib);
@@ -13,6 +13,9 @@ use Net::FTP;
 
 my $Conf  = '.releaserc';
 my $Debug = $ENV{RELEASE_DEBUG} || 0;
+
+my $local  = $ARGV[0];
+my $remote = $ARGV[1] || $ARGV[0];
 
 =head1 NAME
 
@@ -151,6 +154,9 @@ foreach my $key ( qw(CPAN_PASS SF_PASS) )
 # read the configuration
 my $config  = ConfigReader::Simple->new( $Conf );
 die "Could not get configuration data\n" unless ref $config;
+for (qw( cpan_user sf_user sf_group_id sf_package_id )) {
+	die "Missing configuration data: $_\n" unless length $config->$_;
+}
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # set up the globals
@@ -225,6 +231,13 @@ unless( -e 'Makefile.PL' )
 
 my $messages = `make tardist 2>&1`;
 
+if (!$local)
+	{
+	($local) = $messages =~ /^gzip.+?\b(\S+\.tar)$/m;
+	$local .= '.gz';
+	$remote = $local;
+	}
+
 print "done\n";
 }
 
@@ -257,12 +270,13 @@ print "Checking state of CVS... ";
 my @cvs_update = `cvs update 2>&1`;
 chomp( @cvs_update );
 
-my @cvs_states = qw( C M U A ? );
+my @cvs_states = qw( C M U P A ? );
 my %cvs_state;
 my %message    = (
 	C   => 'These files have conflicts',
 	M   => 'These files have not been checked in',
-	U   => 'These files were missing and have been updated',
+	U   => 'These files need to be, and have been, updated',
+	P   => 'These files need to be, and have been, patched',
 	A   => 'These files were added but not checked in',
 	'?' => q|I don't know about these files|,
 	);
@@ -280,18 +294,26 @@ foreach my $state ( @cvs_states )
 local $" = "\n\t";
 my $rule = "-" x 50;
 my $count;
+my $question_count;
 
 foreach my $key ( sort keys %cvs_state )
 	{
 	my $list = $cvs_state{$key};
 	next unless @$list;
-	$count += @$list;
+	$count += @$list unless $key eq '?';
+	$question_count += @$list if $key eq '?';
 
-	print "\t$message{$key}\n\t$rule\n\t@$list\n\n";
+	print "\n\t$message{$key}\n\t$rule\n\t@$list\n";
 	}
 
-die "\nERROR: CVS is not up-to-date: Can't release files\n"
+die "\nERROR: CVS is not up-to-date ($count files): Can't release files\n"
 	if $count;
+
+if ($question_count) {
+	print "\nWARNING: CVS is not up-to-date ($question_count files unknown); ",
+	      "continue anwyay? [Ny] " ;
+	die "Exiting\n" unless <> =~ /^[yY]/;
+}
 
 print "CVS up-to-date\n";
 }
@@ -303,8 +325,6 @@ print "CVS up-to-date\n";
 
 my @Sites = qw(pause.perl.org upload.sourceforge.net);
 
-my $local  = $ARGV[0];
-my $remote = $ARGV[1] || $ARGV[0];
 my( $release ) = $remote =~ m/^(.*?)(?:\.tar\.gz)?$/g;
 print "Release name is $release\n";
 
@@ -411,7 +431,8 @@ $content =~ s|Register New Project.*||s;
 
 print $content if $Debug;
 
-if( $content =~ m/welcomes.*comdog/i )
+my $sf_user = $config->sf_user;
+if( $content =~ m/welcomes.*$sf_user/i )
 	{
 	print "Logged in!\n";
 	}
@@ -427,7 +448,7 @@ else
 # visit the Quick Release System form
 {
 my $request = HTTP::Request->new( GET =>
-	'https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=36221'
+	'https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=' . $config->sf_group_id
 	);
 $cookies->add_cookie_header( $request );
 print $request->as_string, "-" x 73, "\n" if $Debug;
@@ -439,6 +460,9 @@ $cookies->extract_cookies( $response );
 ########################################################################
 # release the file
 {
+my @time = localtime();
+my $date = sprintf "%04d-%02d-%02d", $time[5] + 1900, $time[4] + 1, $time[3];
+
 print "Connecting to SourceForge QRS... ";
 my $cgi = CGI->new();
 my $request = HTTP::Request->new( POST =>
@@ -448,13 +472,13 @@ $cookies->add_cookie_header( $request );
 $cgi->param( 'MAX_FILE_SIZE', 1000000 );
 $cgi->param( 'package_id', $config->sf_package_id  );
 $cgi->param( 'release_name', $release );
-$cgi->param( 'release_date',  '2002-10-08' );
+$cgi->param( 'release_date',  $date );
 $cgi->param( 'status_id', 1 );
 $cgi->param( 'file_name',  $remote );
-$cgi->param( 'type_id', 5002 );
-$cgi->param( 'processor_id', 8000 );
-$cgi->param( 'release_notes', '' );
-$cgi->param( 'release_changes', '' );
+$cgi->param( 'type_id', $config->sf_type_id || 5002 );
+$cgi->param( 'processor_id', $config->sf_processor_id || 8000 );
+$cgi->param( 'release_notes', get_readme() );
+$cgi->param( 'release_changes', get_changes() );
 $cgi->param( 'group_id', $config->sf_group_id );
 $cgi->param( 'preformatted', 1 );
 $cgi->param( 'submit', 'Release File' );
@@ -463,7 +487,7 @@ $request->content_type('application/x-www-form-urlencoded');
 $request->content( $cgi->query_string );
 
 $request->header( "Referer",
-	"https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=36221"
+	"https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=" . $config->sf_group_id
 	 );
 print $request->as_string, "\n",  "-" x 73, "\n" if $Debug;
 
@@ -480,3 +504,27 @@ print "File Released\n";
 }
 
 print "Done.\n";
+
+
+sub get_readme {
+	open my $fh, '<README' or return '';
+	my $data = do {
+		local $/;
+		<$fh>;
+	};
+	return $data;
+}
+
+sub get_changes {
+	open my $fh, '<Changes' or return '';
+	my $data = <$fh>;  # get first line
+	while (<$fh>) {
+		if (/^\S/) { # next line beginning with non-whitespace is end ... YMMV
+			last;
+		}
+		$data .= $_;
+	}
+	return $data;
+}
+
+__END__

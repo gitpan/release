@@ -2,11 +2,9 @@
 
 use Test::More tests => 2;
 
-use Test::File;
-
 my $file = 'blib/script/release';
 
-print "bail out! Script file is missing!" unless file_exists_ok( $file );
+print "bail out! Script file is missing!" unless ok( -e $file, "File exists" );
 
 my $output = `perl -c $file 2>&1`;
 

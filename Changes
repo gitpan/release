@@ -1,2 +1,17 @@
-$Id: Changes,v 1.1 2002/12/11 22:40:24 comdog Exp $
+$Id: Changes,v 1.3 2003/03/03 18:05:11 petdance Exp $
+
+0.11 - Mon Mar  3 11:58:42 2003 (Andy Lester)
+	* Patches to make this less brian-specific.  Thanks to Chris
+	  Nandor for taking it upon himself to do so.
+
+	* Removed a lot of dependencies on external modules. 
+
+0.10 - Wed Dec 11 16:40:53 2002
+	* prompt for comments to put in Changes, commit Changes, and
+	use comments in SourceForge change log notes
+
+	* guess the release file name from 'make dist' so the first
+	argument is now optional
+
+	* put the right date in the SourceForge release date
 
