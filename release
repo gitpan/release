@@ -1,0 +1,482 @@
+#!/usr/bin/perl
+# $Id: release,v 1.20 2002/12/11 22:38:20 comdog Exp $
+use strict;
+
+use lib qw(/usr/local/src/cpan/build/Crypt-SSLeay-0.45/lib);
+
+use CGI qw(-oldstyle_urls);
+use ConfigReader::Simple;
+use LWP::UserAgent;
+use HTTP::Cookies;
+use HTTP::Request;
+use Net::FTP;
+
+my $Conf  = '.releaserc';
+my $Debug = $ENV{RELEASE_DEBUG} || 0;
+
+=head1 NAME
+
+release - upload files to CPAN and SourceForge
+
+=head1 SYNOPSIS
+
+release LOCAL_FILE [ REMOTE_FILE ]
+
+=head1 DESCRIPTION
+
+This program automates Perl module releases.  It uploads the
+module distribution to the PAUSE anonymous FTP directory, then
+uploads it to your CPAN account.  The script also uploads the
+file to the incoming directory for SourceForge.
+
+=head2 Process
+
+The release script checks many things before it actually releases
+the file.  Some of these are annoying, but they are also the last
+line of defense against releasing bad distributions.
+
+=over 4
+
+=item Read the configuration data
+
+Look in the current working directory for C<.releaserc>.  See
+the Configuration section.  If release cannot find the
+configuration file, it dies.
+
+=item Check that CVS is up-to-date
+
+You can release a file without CVS being up-to-date, but this
+script also tags the repository with the version number of the
+release, so it insists on CVS being up-to-date.  It fails otherwise.
+
+=item Upload to PAUSE and SourceForge
+
+Simply drop the distribution in the incoming/ directory of these
+servers.
+
+=item Claim the file on PAUSE
+
+Connect to the PAUSE web thingy and claim the uploaded file
+
+=item Tag the repository
+
+Use the version number (in the distribution name) to tag
+the repository.  You should be able to checkout the code
+from any release.
+
+=item Release to SourceForge
+
+The release name is the distribution name without the .tar.gz.
+The file name is the distribution name.  SourceForge divides
+things into projects (with project IDs) and packages within
+the project (with package IDs).  Specify these in the
+configuration file.
+
+=back
+
+=head2 Configuration
+
+The release script uses a configuration file in the current
+working directory.  The file name is C<.releaserc>.  Although
+most of the information is the same for all of your projects,
+the sf_package_id is probably different.  You can get the
+sf_package_id from the data in the Quick Release Form.
+
+=over 4
+
+=item cpan_user
+
+=item sf_group_id
+
+=item sf_package_id
+
+=item sf_user
+
+=back
+
+=head2 Environment
+
+release reads the CPAN_PASS AND SF_PASS environment variables to set
+the passwords for PAUSE and SourceForge.  The script will exit if you
+do not set them.
+
+The RELEASE_DEBUG environment variable sets the debugging value, which
+is 0 by default.  Set RELEASE_DEBUG to a true value to get debugging
+output.
+
+=head1 TO DO
+
+* make dist should also set the release name (so no command line
+args!)
+
+* check make disttest (to catch MANIFEST errors) -- needs error
+catching and reporting
+
+* SF - make processor type and file type configurable
+
+=head1 SOURCE AVAILABILITY
+
+This source is part of a SourceForge project which always has the
+latest sources in CVS, as well as all of the previous releases.
+
+	https://sourceforge.net/projects/brian-d-foy/
+
+If, for some reason, I disappear from the world, one of the other
+members of the project can shepherd this software appropriately.
+
+=head1 AUTHOR
+
+brian d foy, E<lt>bdfoy@cpan.orgE<gt>
+
+=head1 COPYRIGHT
+
+Copyright 2002, brian d foy, All rights reserved.
+
+You may use this software under the same terms as Perl itself.
+
+=cut
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# make sure we have the right passwords
+foreach my $key ( qw(CPAN_PASS SF_PASS) )
+	{
+	unless( exists $ENV{$key} and defined $ENV{$key} )
+		{
+		print "$key not set! Aborting!\n";
+		exit;
+		}
+	}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# read the configuration
+my $config  = ConfigReader::Simple->new( $Conf );
+die "Could not get configuration data\n" unless ref $config;
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# set up the globals
+my $ua      = LWP::UserAgent->new( agent => 'Mozilla/4.5' );
+my $cookies = HTTP::Cookies->new(
+	file           => ".lwpcookies",
+	hide_cookie2   => 1,
+	autosave       => 1 );
+$cookies->clear;
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# clean up the directory to get rid of old versions
+CLEAN: {
+print "Cleaning directory... ";
+
+unless( -e 'Makefile' )
+	{
+	print " no Makefile---skipping\n";
+	last CLEAN;
+	}
+
+my $messages = `make realclean 2>&1`;
+
+print "done\n";
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# clean up the directory to get rid of old versions
+PERL: {
+print "Recreating make file... ";
+
+unless( -e 'Makefile.PL' )
+	{
+	print " no Makefile.PL---skipping\n";
+	last PERL;
+	}
+
+my $messages = `perl Makefile.PL 2>&1`;
+
+print "done\n";
+};
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# check the tests, which must all pass
+TEST: {
+print "Checking make test... ";
+
+unless( -e 'Makefile.PL' )
+	{
+	print " no Makefile.PL---skipping\n";
+	last TEST;
+	}
+
+my $tests = `make test 2>&1`;
+
+die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
+	unless $tests =~ /All tests successful/;
+
+print "all tests pass\n";
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# XXX: make the distribution
+DIST: {
+print "Making dist... ";
+
+unless( -e 'Makefile.PL' )
+	{
+	print " no Makefile.PL---skipping\n";
+	last DIST;
+	}
+
+my $messages = `make tardist 2>&1`;
+
+print "done\n";
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# XXX: check the distribution test
+DIST_TEST: {
+print "Checking disttest... ";
+
+unless( -e 'Makefile.PL' )
+	{
+	print " no Makefile.PL---skipping\n";
+	last DIST_TEST;
+	}
+
+my $tests = `make disttest 2>&1`;
+
+die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
+	unless $tests =~ /All tests successful/;
+
+print "all tests pass\n";
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# check the state of the CVS repository
+CVS: {
+last CVS unless -d 'CVS';
+
+print "Checking state of CVS... ";
+
+my @cvs_update = `cvs update 2>&1`;
+chomp( @cvs_update );
+
+my @cvs_states = qw( C M U A ? );
+my %cvs_state;
+my %message    = (
+	C   => 'These files have conflicts',
+	M   => 'These files have not been checked in',
+	U   => 'These files were missing and have been updated',
+	A   => 'These files were added but not checked in',
+	'?' => q|I don't know about these files|,
+	);
+
+foreach my $state ( @cvs_states )
+	{
+	my $regex = qr/^\Q$state /;
+
+	$cvs_state{$state} = [
+		map { my $x = $_; $x =~ s/$regex//; $x }
+		grep /$regex/, @cvs_update
+		];
+	}
+
+local $" = "\n\t";
+my $rule = "-" x 50;
+my $count;
+
+foreach my $key ( sort keys %cvs_state )
+	{
+	my $list = $cvs_state{$key};
+	next unless @$list;
+	$count += @$list;
+
+	print "\t$message{$key}\n\t$rule\n\t@$list\n\n";
+	}
+
+die "\nERROR: CVS is not up-to-date: Can't release files\n"
+	if $count;
+
+print "CVS up-to-date\n";
+}
+
+# exit if $Debug;
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# upload the files to the FTP servers
+
+my @Sites = qw(pause.perl.org upload.sourceforge.net);
+
+my $local  = $ARGV[0];
+my $remote = $ARGV[1] || $ARGV[0];
+my( $release ) = $remote =~ m/^(.*?)(?:\.tar\.gz)?$/g;
+print "Release name is $release\n";
+
+foreach my $site ( @Sites )
+	{
+	print "Uploading to $site\n";
+	my $ftp = Net::FTP->new( $site, Debug => $config->debug );
+
+	$ftp->login( "anonymous", $config->cpan_user . '@cpan.org' );
+	$ftp->binary;
+	$ftp->cwd( "/incoming" );
+	$ftp->put( $local, $remote );
+
+	$ftp->quit;
+	}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# claim the file in PAUSE
+{
+my $cgi = CGI->new();
+my $ua  = LWP::UserAgent->new();
+
+my $request = HTTP::Request->new( POST =>
+	'http://pause.perl.org/pause/authenquery' );
+
+$cgi->param( 'HIDDENNAME', $config->cpan_user );
+$cgi->param( 'CAN_MULTIPART', 1 );
+$cgi->param( 'pause99_add_uri_upload', $remote );
+$cgi->param( 'SUBMIT_pause99_add_uri_upload', 'Upload the checked file' );
+$cgi->param( 'pause99_add_uri_sub', 'pause99_add_uri_subdirtext' );
+
+$request->content_type('application/x-www-form-urlencoded');
+$request->authorization_basic( $config->cpan_user, $ENV{CPAN_PASS} );
+$request->content( $cgi->query_string );
+
+my $response = $ua->request( $request );
+
+print "PAUSE upload ",
+	$response->as_string =~ /Query succeeded/ ? "successful" : 'failed',
+	"\n";
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# tag the release
+CVS_TAG: {
+my $file = $remote;
+my( $major, $minor ) = $file =~ /(\d+) \. (\d+(?:_\d+)?) (?:\. tar \. gz)? $/xg;
+my $tag = "RELEASE_${major}_$minor";
+print "Tagging release with $tag\n";
+
+system 'cvs', 'tag', $tag;
+}
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+# Do the SourceForge stuff
+
+# SourceForge seems to know our path through the system
+# Hit all the pages, collect the right cookies, etc
+
+########################################################################
+# authenticate
+SF_LOGIN: {
+print "Logging in to SourceForge... ";
+
+my $cgi = CGI->new();
+my $request = HTTP::Request->new( POST =>
+    'https://sourceforge.net/account/login.php' );
+$cookies->add_cookie_header( $request );
+
+$cgi->param( 'return_to', '' );
+$cgi->param( 'form_loginname', $config->sf_user );
+$cgi->param( 'form_pw', $ENV{SF_PASS} );
+$cgi->param( 'stay_in_ssl', 1 );
+$cgi->param( 'login', 'Login With SSL' );
+
+$request->content_type('application/x-www-form-urlencoded');
+$request->content( $cgi->query_string );
+
+$request->header( "Referer", "http://sourceforge.net/account/login.php" );
+
+print $request->as_string, "-" x 73, "\n" if $Debug;
+
+my $response = $ua->request( $request );
+  $cookies->extract_cookies( $response );
+
+print $response->headers_as_string,  "-" x 73, "\n" if $Debug;
+
+if( $response->code == 302 )
+	{
+	my $location = $response->header('Location');
+	print "Location is $location\n" if $Debug;
+	my $request = HTTP::Request->new( GET => $location );
+	$cookies->add_cookie_header( $request );
+	print $request->as_string, "-" x 73, "\n" if $Debug;
+	$response = $ua->request( $request );
+	print $response->headers_as_string,  "-" x 73, "\n" if $Debug;
+	  $cookies->extract_cookies( $response );
+	}
+
+my $content = $response->content;
+$content =~ s|.*<!-- begin SF.net content -->||s;
+$content =~ s|Register New Project.*||s;
+
+print $content if $Debug;
+
+if( $content =~ m/welcomes.*comdog/i )
+	{
+	print "Logged in!\n";
+	}
+else
+	{
+	print "Not logged in! Aborting\n";
+	exit;
+	}
+
+}
+
+########################################################################
+# visit the Quick Release System form
+{
+my $request = HTTP::Request->new( GET =>
+	'https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=36221'
+	);
+$cookies->add_cookie_header( $request );
+print $request->as_string, "-" x 73, "\n" if $Debug;
+my $response = $ua->request( $request );
+print $response->headers_as_string,  "-" x 73, "\n" if $Debug;
+$cookies->extract_cookies( $response );
+}
+
+########################################################################
+# release the file
+{
+print "Connecting to SourceForge QRS... ";
+my $cgi = CGI->new();
+my $request = HTTP::Request->new( POST =>
+    'https://sourceforge.net/project/admin/qrs.php' );
+$cookies->add_cookie_header( $request );
+
+$cgi->param( 'MAX_FILE_SIZE', 1000000 );
+$cgi->param( 'package_id', $config->sf_package_id  );
+$cgi->param( 'release_name', $release );
+$cgi->param( 'release_date',  '2002-10-08' );
+$cgi->param( 'status_id', 1 );
+$cgi->param( 'file_name',  $remote );
+$cgi->param( 'type_id', 5002 );
+$cgi->param( 'processor_id', 8000 );
+$cgi->param( 'release_notes', '' );
+$cgi->param( 'release_changes', '' );
+$cgi->param( 'group_id', $config->sf_group_id );
+$cgi->param( 'preformatted', 1 );
+$cgi->param( 'submit', 'Release File' );
+
+$request->content_type('application/x-www-form-urlencoded');
+$request->content( $cgi->query_string );
+
+$request->header( "Referer",
+	"https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=36221"
+	 );
+print $request->as_string, "\n",  "-" x 73, "\n" if $Debug;
+
+my $response = $ua->request( $request );
+print $response->headers_as_string, "\n",  "-" x 73, "\n" if $Debug;
+
+
+my $content = $response->content;
+$content =~ s|.*Database Admin.*?<H3><FONT.*?>\s*||s;
+$content =~ s|\s*</FONT></H3>.*||s;
+
+print "$content\n" if $Debug;
+print "File Released\n";
+}
+
+print "Done.\n";
