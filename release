@@ -1,51 +1,5 @@
 #!/usr/bin/perl
-# $Id: release,v 1.33 2003/03/14 17:23:12 petdance Exp $
-use strict;
-
-use Config;
-use CGI qw(-oldstyle_urls);
-use ConfigReader::Simple;
-use Getopt::Std;
-use LWP::UserAgent;
-use HTTP::Cookies;
-use HTTP::Request;
-use Net::FTP;
-
-use constant DASHES => "-" x 73;
-
-my %opts;
-getopts('hdt', \%opts);
-
-if ($opts{h}) {
-        print <<"USAGE";
-
-Usage: release -hdt [ LOCAL_FILE REMOTE_FILE ]
-
-Will upload current release LOCAL_FILE, naming it REMOTE_FILE.  Will
-get LOCAL_FILE and REMOTE_FILE automatically (using same name for both)
-if not supplied.
-
-  -h   This help
-  -d   Print extra debugging information
-  -t   Just make and test distribution, don't tag/upload
-
-The program works in the current directory, and looks for a .releaserc
-file and the environment for its preferences.  See `man release`, or
-`perldoc $0`, for more information.
-
-USAGE
-        exit();
-}
-
-# I like these kind of make-like variables
-my $MAKE = $Config{make};
-my $PERL = $ENV{PERL} || $^X;
-
-my $Conf  = '.releaserc';
-my $Debug = $ENV{RELEASE_DEBUG} || $opts{d} || 0;
-
-my $local  = $ARGV[0];
-my $remote = $ARGV[1] || $ARGV[0];
+# $Id: release,v 1.35 2003/03/27 05:19:08 petdance Exp $
 
 =head1 NAME
 
@@ -224,482 +178,65 @@ You may use this software under the same terms as Perl itself.
 
 =cut
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# read the configuration
-die "Could not find $Conf file\n" unless -e $Conf;
-my $config  = ConfigReader::Simple->new( $Conf );
-die "Could not get configuration data\n" unless ref $config;
 
-my $cpan = $config->cpan_user eq '<none>' ? 0 : 1;
-my $sf   = $config->sf_user   eq '<none>' ? 0 : 1;
-my $passive_ftp = $config->passive_ftp =~ /^y(es)?/ ? 1 : 0;
+use strict;
 
-my @required = qw( sf_user cpan_user );
-push( @required, qw( sf_group_id sf_package_id ) ) if $sf;
+use Module::Release;
 
-my $ok = 1;
-for( @required ) {
-        unless ( length $config->$_ ) {
-                $ok = 0;  
-                print "Missing configuration data: $_; Aborting!\n";
-        }
-}
-exit unless $ok;
+use Getopt::Std;
 
-if( !$cpan && !$sf )
-        {
-        print "Must upload to the CPAN or SourceForge.net; Aborting!\n";
-        exit;
-        }
-elsif( !$cpan )
-        {
-        print "Uploading to SourceForge.net only\n";
-        }
-elsif( !$sf )
-        {
-        print "Uploading to the CPAN only\n";
-        }
+my %opts;
+getopts('hdt', \%opts);
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# make sure we have the right passwords
-my $CPAN_PASS;
-my $SF_PASS;
-if ( $cpan ) {
-    $CPAN_PASS = getpass( "CPAN_PASS" );
+if ($opts{h}) {
+        print <<"USAGE";
+
+Usage: release -hdt [ LOCAL_FILE REMOTE_FILE ]
+
+Will upload current release LOCAL_FILE, naming it REMOTE_FILE.  Will
+get LOCAL_FILE and REMOTE_FILE automatically (using same name for both)
+if not supplied.
+
+  -h   This help
+  -d   Print extra debugging information
+  -t   Just make and test distribution, don't tag/upload
+
+The program works in the current directory, and looks for a .releaserc
+file and the environment for its preferences.  See `man release`, or
+`perldoc $0`, for more information.
+
+USAGE
+        exit();
 }
 
-if ( $sf ) {
-    $SF_PASS = getpass( "SF_PASS" );
+# Construct the Release object
+my %params;
+$params{local}  = shift(@ARGV) if @ARGV;
+if (@ARGV) {
+    $params{remote} = shift(@ARGV);
+} elsif ($params{local}) {
+    $params{remote} = $params{local};
 }
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# set up the globals
-my $ua      = LWP::UserAgent->new( agent => 'Mozilla/4.5' );
-my $cookies = HTTP::Cookies->new(
-        file           => ".lwpcookies",
-        hide_cookie2   => 1,
-        autosave       => 1 );
-$cookies->clear;
+$params{debug} = 1 if $opts{d};
 
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# clean up the directory to get rid of old versions
-CLEAN: {
-    print "Cleaning directory... ";
+my $r = Module::Release->new(%params);
 
-    unless( -e 'Makefile' ) {
-        print " no Makefile---skipping\n";
-        last CLEAN;
-    }
-
-    my $messages = run( "$MAKE realclean 2>&1" );
-
-    print "done\n";
-
-    print $messages, DASHES, "\n" if $Debug;
-} # CLEAN
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# clean up the directory to get rid of old versions
-PERL: {
-    print "Recreating make file... ";
-
-    unless( -e 'Makefile.PL' ) {
-        print " no Makefile.PL---skipping\n";
-        last PERL;
-    }
-
-    my $messages = run( "$PERL Makefile.PL 2>&1" );
-
-    print "done\n";
-
-    print $messages, DASHES, "\n" if $Debug;
-} # PERL
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# check the tests, which must all pass
-TEST: {
-    print "Checking make test... ";
-
-    unless( -e 'Makefile.PL' ) {
-        print " no Makefile.PL---skipping\n";
-        last TEST;
-    }
-
-    my $tests = run( "$MAKE test 2>&1" );
-
-    die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
-            unless $tests =~ /All tests successful/;
-
-    print "all tests pass\n";
-
-    print $tests, DASHES, "\n" if $Debug;
-} # TEST
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# XXX: make the distribution
-DIST: {
-    print "Making dist... ";
-
-    unless( -e 'Makefile.PL' ) {
-        print " no Makefile.PL---skipping\n";
-        last DIST;
-    }
-
-    my $messages = run( "$MAKE tardist 2>&1" );
-
-    unless( $local ){
-        print ", guessing local distribution name" if $Debug;
-        ($local) = $messages =~ /^\s*gzip.+?\b(\S+\.tar)\s*$/m;
-        $local .= '.gz';
-        $remote = $local;
-    }
-
-    die "Couldn't guess distname from tardist output\n" unless $local;
-    die "Local file '$local' does not exist\n" unless -f $local;
-
-    print "done\n";
-
-    print $messages, DASHES, "\n" if $Debug;
-} # DIST
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# XXX: check the distribution test
-DIST_TEST: {
-    print "Checking disttest... ";
-
-    unless( -e 'Makefile.PL' ) {
-        print " no Makefile.PL---skipping\n";
-        last DIST_TEST;
-    }
-
-    my $tests = run( "$MAKE disttest 2>&1" );
-
-    die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
-            unless $tests =~ /All tests successful/;
-
-    print "all tests pass\n";
-
-    print $tests, DASHES, "\n" if $Debug;
-} # DIST_TEST
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# check the state of the CVS repository
-CVS: {
-    last CVS unless -d 'CVS';
-
-    print "Checking state of CVS... ";
-
-    my @cvs_update = run( "cvs -n update 2>&1" );
-    chomp( @cvs_update );
-
-    if( $? )
-            {
-            print join("\n", @cvs_update, "\n"), DASHES, "\n" if $Debug;
-            die sprintf("\nERROR: cvs failed with non-zero exit status: %d\n\n" .
-                    "Aborting release\n", $? >> 8);
-            }
-
-    my @cvs_states = qw( C M U P A ? );
-    my %cvs_state;
-    my %message    = (
-            C   => 'These files have conflicts',
-            M   => 'These files have not been checked in',
-            U   => 'These files need to be updated',
-            P   => 'These files need to be patched',
-            A   => 'These files were added but not checked in',
-            '?' => q|I don't know about these files|,
-            );
-
-    foreach my $state ( @cvs_states )
-            {
-            my $regex = qr/^\Q$state /;
-
-            $cvs_state{$state} = [
-                    map { my $x = $_; $x =~ s/$regex//; $x }
-                    grep /$regex/, @cvs_update
-                    ];
-            }
-
-    local $" = "\n\t";
-    my $rule = "-" x 50;
-    my $count;
-    my $question_count;
-
-    foreach my $key ( sort keys %cvs_state ) {
-            my $list = $cvs_state{$key};
-            next unless @$list;
-            $count += @$list unless $key eq '?';
-            $question_count += @$list if $key eq '?';
-
-            print "\n\t$message{$key}\n\t$rule\n\t@$list\n";
-            }
-
-    die "\nERROR: CVS is not up-to-date ($count files): Can't release files\n"
-            if $count;
-
-    if( $question_count ) {
-            print "\nWARNING: CVS is not up-to-date ($question_count files unknown); ",
-                    "continue anwyay? [Ny] " ;
-            die "Exiting\n" unless <> =~ /^[yY]/;
-    }
-
-    print "CVS up-to-date\n";
-
-    print join("\n", @cvs_update, "\n"), DASHES, "\n" if $Debug;
-} # CVS
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# upload the files to the FTP servers
-
-my @Sites;
-push @Sites, 'pause.perl.org' if $cpan;
-push @Sites, 'upload.sourceforge.net' if $sf;
-
-my( $release ) = $remote =~ m/^(.*?)(?:\.tar\.gz)?$/g;
-
-# set your own release name if you want to ...
-if( $config->sf_release_match && $config->sf_release_replace )
-        {
-        my $match   = $config->sf_release_match;
-        my $replace = $config->sf_release_replace;
-        $release =~ s/$match/$replace/ee;
-        }
-
-print "Release name is $release\n";
-print "Will use passive FTP transfers\n" if $passive_ftp && $Debug;
-
+$r->clean;
+$r->perl;
+$r->test;
+$r->dist;
+$r->dist_test;
+$r->cvs;
 exit if $opts{t};
 
-foreach my $site ( @Sites )
-        {
-        print "Uploading to $site\n";
-        my $ftp = Net::FTP->new( $site, Debug => $Debug, Passive => $passive_ftp );
-
-        $ftp->login( "anonymous", $config->cpan_user . '@cpan.org' );
-        $ftp->pasv if $passive_ftp;
-        $ftp->binary;
-        $ftp->cwd( "/incoming" );
-        $ftp->put( $local, $remote );
-
-        $ftp->quit;
-        }
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# claim the file in PAUSE
-PAUSE_CLAIM: {
-    last PAUSE_CLAIM unless $cpan;
-
-    my $cgi = CGI->new();
-    my $ua  = LWP::UserAgent->new();
-
-    my $request = HTTP::Request->new( POST =>
-            'http://pause.perl.org/pause/authenquery' );
-
-    $cgi->param( 'HIDDENNAME', $config->cpan_user );
-    $cgi->param( 'CAN_MULTIPART', 1 );
-    $cgi->param( 'pause99_add_uri_upload', $remote );
-    $cgi->param( 'SUBMIT_pause99_add_uri_upload', 'Upload the checked file' );
-    $cgi->param( 'pause99_add_uri_sub', 'pause99_add_uri_subdirtext' );
-
-    $request->content_type('application/x-www-form-urlencoded');
-    $request->authorization_basic( $config->cpan_user, $CPAN_PASS );
-    $request->content( $cgi->query_string );
-
-    my $response = $ua->request( $request );
-
-    print "PAUSE upload ",
-            $response->as_string =~ /Query succeeded/ ? "successful" : 'failed',
-            "\n";
-} # PAUSE_CLAIM
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# tag the release
-CVS_TAG: {
-    my $file = $remote;
-    my( $major, $minor ) = $file =~ /(\d+) \. (\d+(?:_\d+)?) (?:\. tar \. gz)? $/xg;
-    my $tag = "RELEASE_${major}_$minor";
-    print "Tagging release with $tag\n";
-
-    system 'cvs', 'tag', $tag;
-
-    if ( $? ) {
-            # already uploaded, and tagging is not (?) essential, so warn, don't die
-            warn sprintf(
-                    "\nWARNING: cvs failed with non-zero exit status: %d\n",
-                    $? >> 8
-            );
-    }
-
-} # CVS_TAG
-
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# Do the SourceForge.net stuff
-
-# SourceForge.net seems to know our path through the system
-# Hit all the pages, collect the right cookies, etc
-
-########################################################################
-# authenticate
-SF_LOGIN: {
-    last SF_LOGIN unless $sf;
-
-    print "Logging in to SourceForge.net... ";
-
-    my $cgi = CGI->new();
-    my $request = HTTP::Request->new( POST =>
-        'https://sourceforge.net/account/login.php' );
-    $cookies->add_cookie_header( $request );
-
-    $cgi->param( 'return_to', '' );
-    $cgi->param( 'form_loginname', $config->sf_user );
-    $cgi->param( 'form_pw', $SF_PASS );
-    $cgi->param( 'stay_in_ssl', 1 );
-    $cgi->param( 'login', 'Login With SSL' );
-
-    $request->content_type('application/x-www-form-urlencoded');
-    $request->content( $cgi->query_string );
-
-    $request->header( "Referer", "http://sourceforge.net/account/login.php" );
-
-    print $request->as_string, DASHES, "\n" if $Debug;
-
-    my $response = $ua->request( $request );
-    $cookies->extract_cookies( $response );
-
-    print $response->headers_as_string, DASHES, "\n" if $Debug;
-
-    if( $response->code == 302 ) {
-        my $location = $response->header('Location');
-        print "Location is $location\n" if $Debug;
-        my $request = HTTP::Request->new( GET => $location );
-        $cookies->add_cookie_header( $request );
-        print $request->as_string, DASHES, "\n" if $Debug;
-        $response = $ua->request( $request );
-        print $response->headers_as_string, DASHES, "\n" if $Debug;
-        $cookies->extract_cookies( $response );
-    }
-
-    my $content = $response->content;
-    $content =~ s|.*<!-- begin SF.net content -->||s;
-    $content =~ s|Register New Project.*||s;
-
-    print $content if $Debug;
-
-    my $sf_user = $config->sf_user;
-    if( $content =~ m/welcomes.*$sf_user/i ) {
-        print "Logged in!\n";
-    } else {
-        print "Not logged in! Aborting\n";
-        exit;
-    }
-} # SF_LOGIN
-
-########################################################################
-# visit the Quick Release System form
-SF_QRS: {
-    last SF_QRS unless $sf;
-
-    my $request = HTTP::Request->new( GET =>
-        'https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=' . $config->sf_group_id
-    );
-    $cookies->add_cookie_header( $request );
-    print $request->as_string, DASHES, "\n" if $Debug;
-    my $response = $ua->request( $request );
-    print $response->headers_as_string,  DASHES, "\n" if $Debug;
-    $cookies->extract_cookies( $response );
-} # SF_QRS
-
-########################################################################
-# release the file
-SF_RELEASE: {
-    last SF_RELEASE unless $sf;
-
-    my @time = localtime();
-    my $date = sprintf "%04d-%02d-%02d", $time[5] + 1900, $time[4] + 1, $time[3];
-
-    print "Connecting to SourceForge.net QRS... ";
-    my $cgi = CGI->new();
-    my $request = HTTP::Request->new( POST => 'https://sourceforge.net/project/admin/qrs.php' );
-    $cookies->add_cookie_header( $request );
-
-    $cgi->param( 'MAX_FILE_SIZE', 1000000 );
-    $cgi->param( 'package_id', $config->sf_package_id  );
-    $cgi->param( 'release_name', $release );
-    $cgi->param( 'release_date',  $date );
-    $cgi->param( 'status_id', 1 );
-    $cgi->param( 'file_name',  $remote );
-    $cgi->param( 'type_id', $config->sf_type_id || 5002 );
-    $cgi->param( 'processor_id', $config->sf_processor_id || 8000 );
-    $cgi->param( 'release_notes', get_readme() );
-    $cgi->param( 'release_changes', get_changes() );
-    $cgi->param( 'group_id', $config->sf_group_id );
-    $cgi->param( 'preformatted', 1 );
-    $cgi->param( 'submit', 'Release File' );
-
-    $request->content_type('application/x-www-form-urlencoded');
-    $request->content( $cgi->query_string );
-
-    $request->header( "Referer",
-        "https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=" . $config->sf_group_id
-    );
-    print $request->as_string, "\n", DASHES, "\n" if $Debug;
-
-    my $response = $ua->request( $request );
-    print $response->headers_as_string, "\n", DASHES, "\n" if $Debug;
-
-    my $content = $response->content;
-    $content =~ s|.*Database Admin.*?<H3><FONT.*?>\s*||s;
-    $content =~ s|\s*</FONT></H3>.*||s;
-
-    print "$content\n" if $Debug;
-    print "File Released\n";
-} # SF_RELEASE
+$r->ftp_upload;
+$r->pause_claim;
+$r->cvs_tag;
+$r->sf_login;
+$r->sf_qrs;
+$r->sf_release;
 
 print "Done.\n";
-
-
-sub get_readme {
-        open my $fh, '<README' or return '';
-        my $data = do {
-                local $/;
-                <$fh>;
-        };
-        return $data;
-}
-
-sub get_changes {
-        open my $fh, '<Changes' or return '';
-        my $data = <$fh>;  # get first line
-        while (<$fh>) {
-                if (/^\S/) { # next line beginning with non-whitespace is end ... YMMV
-                        last;
-                }
-                $data .= $_;
-        }
-        return $data;
-}
-
-sub run {
-    my $command = shift;
-    print "$command\n" if $Debug;
-    return `$command`;
-};
-
-sub getpass {
-    my $field = shift;
-
-    my $pass = $ENV{$field};
-    
-    return $pass if defined( $pass ) && length( $pass );
-
-    print "$field is not set.  Enter it now: ";
-    $pass = <>;
-    chomp $pass;
-
-    return $pass if defined( $pass ) && length( $pass );
-
-    die "$field not supplied.  Aborting...\n";
-}
 
 __END__

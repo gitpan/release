@@ -1,4 +1,4 @@
-# $Id: Makefile.PL,v 1.9 2003/03/19 21:40:24 petdance Exp $
+# $Id: Makefile.PL,v 1.10 2003/03/27 04:58:58 petdance Exp $
 use ExtUtils::MakeMaker;
 
 eval "use Test::Pod";
@@ -9,7 +9,7 @@ if ( $@ ) {
 
 WriteMakefile(
 	'NAME'	    => 'release',
-	'VERSION'   => '0.16',
+	'VERSION_FROM' => "lib/Module/Release.pm",
 	
 	'EXE_FILES' =>  [ 'release' ],
 	    	

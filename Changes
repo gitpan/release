@@ -1,4 +1,10 @@
-$Id: Changes,v 1.12 2003/03/19 21:40:24 petdance Exp $
+$Id: Changes,v 1.14 2003/03/27 05:17:04 petdance Exp $
+
+0.20 - Wed Mar 26 11:05:00 2003 (Andy Lester)
+        * Moved all the real work into Module::Release.  Thanks to 
+	  Ken Williams for doing all the dirty work on this.
+
+	* Fixed the Test::Pod dependency
 
 0.16 - Wed Mar 19 15:38:00 2003 (Andy Lester)
 	* No new features
