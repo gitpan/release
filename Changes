@@ -1,4 +1,25 @@
-$Id: Changes,v 1.5 2003/03/06 19:57:55 petdance Exp $
+$Id: Changes,v 1.8 2003/03/12 15:59:05 petdance Exp $
+
+0.13 - Wed Mar 12 09:58:00 2003 (Andy Lester)
+	Most of these changes are from Max Maischein.  Cross-platform
+	compatibility should be a lot better.  Thanks, Max!
+
+	* Prompts for passwords that are not set in the environment.
+
+	* Fixed a bug in checking for required fields
+
+	* Uses "$Config{make}" instead of "make".
+
+	* Moved all backticks into a subroutine "run", that also echoes
+	  the command if "-d" is set.
+
+	* Added a check whether the file-to-distribute actually exists,
+	  before making the ftp connection.
+
+	* The regex to guess the distname from the tardist output
+	  needed some whitespace added to work with Win32.
+
+	* Added support for passive FTP.
 
 0.12 - Thu Mar  6 13:55:47 2003 (Andy Lester)
 	Most of the changes in this revision are from Chris Nandor:

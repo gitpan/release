@@ -1,7 +1,8 @@
 #!/usr/bin/perl
-# $Id: release,v 1.24 2003/03/06 19:56:59 petdance Exp $
+# $Id: release,v 1.29 2003/03/12 15:57:38 petdance Exp $
 use strict;
 
+use Config;
 use CGI qw(-oldstyle_urls);
 use ConfigReader::Simple;
 use Getopt::Std;
@@ -33,6 +34,10 @@ file and the environment for its preferences.  See `man release`, or
 USAGE
 	exit();
 }
+
+# I like these kind of make-like variables
+my $MAKE = $Config{make};
+my $PERL = $^X;
 
 my $Conf  = '.releaserc';
 my $Debug = $ENV{RELEASE_DEBUG} || $opts{d} || 0;
@@ -156,6 +161,15 @@ set the name for this program to something like "release-0.10".
 But if you want the name to be only the version number, set
 C<sf_release_match=^.+-([\d.]+)$> and C<sf_release_replace=$1>.
 
+=over 4
+
+=item passive_ftp
+
+=back
+
+Set C<passive_ftp> to "y" or "yes" for passive FTP transfers.  Usually
+this is to get around a firewall issue.
+
 =head2 Environment
 
 release reads the C<CPAN_PASS> and C<SF_PASS> environment variables to
@@ -201,12 +215,13 @@ die "Could not get configuration data\n" unless ref $config;
 
 my $cpan = $config->cpan_user eq '<none>' ? 0 : 1;
 my $sf   = $config->sf_user   eq '<none>' ? 0 : 1;
+my $passive_ftp = $config->passive_ftp =~ /^y(es)?/ ? 1 : 0;
 
 my @required = qw( sf_user cpan_user );
 push( @required, qw( sf_group_id sf_package_id ) ) if $sf;
 
 my $ok = 1;
-for( qw( cpan_user sf_user sf_group_id sf_package_id ) ) {
+for( @required ) {
 	unless ( length $config->$_ ) {
 		$ok = 0;  
 		print "Missing configuration data: $_; Aborting!\n";
@@ -230,23 +245,15 @@ elsif( !$sf )
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # make sure we have the right passwords
-if( $cpan )
-	{
-	unless( exists $ENV{CPAN_PASS} and defined $ENV{CPAN_PASS} )
-		{
-		print "\$ENV{CPAN_PASS} not set! Aborting!\n";
-		exit;
-		}
-	}
-	
-if( $sf )
-	{
-	unless( exists $ENV{SF_PASS} and defined $ENV{SF_PASS} )
-		{
-		print "\$ENV{SF_PASS} not set! Aborting!\n";
-		exit;
-		}
-	}
+my $CPAN_PASS;
+my $SF_PASS;
+if ( $cpan ) {
+    $CPAN_PASS = getpass( "CPAN_PASS" );
+}
+
+if ( $sf ) {
+    $SF_PASS = getpass( "SF_PASS" );
+}
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # set up the globals
@@ -268,7 +275,7 @@ unless( -e 'Makefile' )
 	last CLEAN;
 	}
 
-my $messages = `make realclean 2>&1`;
+my $messages = run( "$MAKE realclean 2>&1" );
 
 print "done\n";
 
@@ -286,7 +293,7 @@ unless( -e 'Makefile.PL' )
 	last PERL;
 	}
 
-my $messages = `perl Makefile.PL 2>&1`;
+my $messages = run( "$PERL Makefile.PL 2>&1" );
 
 print "done\n";
 
@@ -304,7 +311,7 @@ unless( -e 'Makefile.PL' )
 	last TEST;
 	}
 
-my $tests = `make test 2>&1`;
+my $tests = run( "$MAKE test 2>&1" );
 
 die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
 	unless $tests =~ /All tests successful/;
@@ -325,14 +332,18 @@ unless( -e 'Makefile.PL' )
 	last DIST;
 	}
 
-my $messages = `make tardist 2>&1`;
+my $messages = run( "$MAKE tardist 2>&1" );
 
 unless( $local )
 	{
-	($local) = $messages =~ /^gzip.+?\b(\S+\.tar)$/m;
+	print ", guessing local distribution name" if $Debug;
+        ($local) = $messages =~ /^\s*gzip.+?\b(\S+\.tar)\s*$/m;
 	$local .= '.gz';
 	$remote = $local;
 	}
+
+die "Couldn't guess distname from tardist output\n" unless $local;
+die "Local file '$local' does not exist\n" unless -f $local;
 
 print "done\n";
 
@@ -350,7 +361,7 @@ unless( -e 'Makefile.PL' )
 	last DIST_TEST;
 	}
 
-my $tests = `make disttest 2>&1`;
+my $tests = run( "$MAKE disttest 2>&1" );
 
 die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
 	unless $tests =~ /All tests successful/;
@@ -367,7 +378,7 @@ last CVS unless -d 'CVS';
 
 print "Checking state of CVS... ";
 
-my @cvs_update = `cvs -n update 2>&1`;
+my @cvs_update = run( "cvs -n update 2>&1" );
 chomp( @cvs_update );
 
 if( $? )
@@ -445,15 +456,17 @@ if( $config->sf_release_match && $config->sf_release_replace )
 	}
 
 print "Release name is $release\n";
+print "Will use passive FTP transfers\n" if $passive_ftp && $Debug;
 
 exit if $opts{t};
 
 foreach my $site ( @Sites )
 	{
 	print "Uploading to $site\n";
-	my $ftp = Net::FTP->new( $site, Debug => $Debug );
+	my $ftp = Net::FTP->new( $site, Debug => $Debug, Passive => $passive_ftp );
 
 	$ftp->login( "anonymous", $config->cpan_user . '@cpan.org' );
+	$ftp->pasv if $passive_ftp;
 	$ftp->binary;
 	$ftp->cwd( "/incoming" );
 	$ftp->put( $local, $remote );
@@ -479,7 +492,7 @@ $cgi->param( 'SUBMIT_pause99_add_uri_upload', 'Upload the checked file' );
 $cgi->param( 'pause99_add_uri_sub', 'pause99_add_uri_subdirtext' );
 
 $request->content_type('application/x-www-form-urlencoded');
-$request->authorization_basic( $config->cpan_user, $ENV{CPAN_PASS} );
+$request->authorization_basic( $config->cpan_user, $CPAN_PASS );
 $request->content( $cgi->query_string );
 
 my $response = $ua->request( $request );
@@ -499,8 +512,7 @@ print "Tagging release with $tag\n";
 
 system 'cvs', 'tag', $tag;
 
-if( $? )
-	{
+if ( $? ) {
 	# already uploaded, and tagging is not (?) essential, so warn, don't die
 	warn sprintf(
 		"\nWARNING: cvs failed with non-zero exit status: %d\n",
@@ -531,7 +543,7 @@ $cookies->add_cookie_header( $request );
 
 $cgi->param( 'return_to', '' );
 $cgi->param( 'form_loginname', $config->sf_user );
-$cgi->param( 'form_pw', $ENV{SF_PASS} );
+$cgi->param( 'form_pw', $SF_PASS );
 $cgi->param( 'stay_in_ssl', 1 );
 $cgi->param( 'login', 'Login With SSL' );
 
@@ -663,6 +675,28 @@ sub get_changes {
 		$data .= $_;
 	}
 	return $data;
+}
+
+sub run {
+    my $command = shift;
+    print "$command\n" if $Debug;
+    return `$command`;
+};
+
+sub getpass {
+    my $field = shift;
+
+    my $pass = $ENV{$field};
+    
+    return if defined( $pass ) && length( $pass );
+
+    print "$field is not set.  Enter it now: ";
+    $pass = <>;
+    chomp $pass;
+
+    return if defined( $pass ) && length( $pass );
+
+    die "$field not supplied.  Aborting...\n";
 }
 
 __END__
