@@ -1,9 +1,9 @@
-# $Id: Makefile.PL,v 1.6 2003/03/12 15:59:05 petdance Exp $
+# $Id: Makefile.PL,v 1.7 2003/03/12 16:10:44 petdance Exp $
 use ExtUtils::MakeMaker;
 
 WriteMakefile(
 	'NAME'	    => 'release',
-	'VERSION'   => '0.13',
+	'VERSION'   => '0.14',
 	
 	'EXE_FILES' =>  [ 'release' ],
 	    	

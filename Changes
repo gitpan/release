@@ -1,4 +1,7 @@
-$Id: Changes,v 1.8 2003/03/12 15:59:05 petdance Exp $
+$Id: Changes,v 1.9 2003/03/12 16:10:44 petdance Exp $
+
+0.14 - Wed Mar 12 10:09:00 2003 (Andy Lester)
+	* 0.13 is an incorrect distro.  This is what you want.
 
 0.13 - Wed Mar 12 09:58:00 2003 (Andy Lester)
 	Most of these changes are from Max Maischein.  Cross-platform

@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# $Id: release,v 1.29 2003/03/12 15:57:38 petdance Exp $
+# $Id: release,v 1.30 2003/03/12 16:02:44 petdance Exp $
 use strict;
 
 use Config;
@@ -688,13 +688,13 @@ sub getpass {
 
     my $pass = $ENV{$field};
     
-    return if defined( $pass ) && length( $pass );
+    return $pass if defined( $pass ) && length( $pass );
 
     print "$field is not set.  Enter it now: ";
     $pass = <>;
     chomp $pass;
 
-    return if defined( $pass ) && length( $pass );
+    return $pass if defined( $pass ) && length( $pass );
 
     die "$field not supplied.  Aborting...\n";
 }
