@@ -1,18 +1,4 @@
-$Id: Changes,v 1.27 2004/12/17 21:54:48 petdance Exp $
-
-0.25 - Fri Dec 17 15:53:15 CST 2004
-	* No changes to functionality.
-	* Released only because I (Andy) deleted the latest version,
-	  because I thought brian had newer ones, when he didn't.
-	  This meant that the indexer got all confused.  I hope this
-	  stops people from now wondering "Where did Module::Release go?"
-	* Modernized t/pod.t
-	* Made tests in t/load.t more inclusive
-	* Updated the Makefile.PL
-
-0.24 - Sat Nov 29 09:29:36 2003
-	* fixed a problem in Module::Release's check_cvs routine where
-	it was not checking each line of output
+$Id: Changes,v 1.24 2003/07/01 02:03:50 petdance Exp $
 
 0.23 - Sun Jun 22 23:40:00 2003 (Andy Lester)
         * All output now goes to the screen if --debug is on.  Thanks to
