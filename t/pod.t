@@ -1,17 +1,5 @@
-# $Id: pod.t,v 1.6 2003/03/29 21:48:05 petdance Exp $
-
-BEGIN {
-    @pods = qw(
-	blib/lib/Module/Release.pm
-	blib/script/release
-    );
-}
-
-use Test::More tests => scalar @pods;
-
-SKIP: {
-    eval "use Test::Pod 0.95";
-    skip "Test::Pod 0.95 not installed", scalar @pods if $@;
-    pod_file_ok($_) for @pods;
-}
-
+#$Id: pod.t,v 1.7 2004/09/02 01:29:20 comdog Exp $
+use Test::More;
+eval "use Test::Pod 1.00";
+plan skip_all => "Test::Pod 1.00 required for testing POD" if $@;
+all_pod_files_ok();

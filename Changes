@@ -1,8 +1,27 @@
-$Id: Changes,v 1.23 2003/06/23 04:44:16 petdance Exp $
+$Id: Changes,v 1.27 2004/12/17 21:54:48 petdance Exp $
+
+0.25 - Fri Dec 17 15:53:15 CST 2004
+	* No changes to functionality.
+	* Released only because I (Andy) deleted the latest version,
+	  because I thought brian had newer ones, when he didn't.
+	  This meant that the indexer got all confused.  I hope this
+	  stops people from now wondering "Where did Module::Release go?"
+	* Modernized t/pod.t
+	* Made tests in t/load.t more inclusive
+	* Updated the Makefile.PL
+
+0.24 - Sat Nov 29 09:29:36 2003
+	* fixed a problem in Module::Release's check_cvs routine where
+	it was not checking each line of output
 
 0.23 - Sun Jun 22 23:40:00 2003 (Andy Lester)
         * All output now goes to the screen if --debug is on.  Thanks to
           Ken Williams.  "High school students."
+
+0.23
+	* release will show the user all STDOUT of the subprocesses
+	  whenever debug is on.  This will prevent the machine from waiting
+	  for a response from you because you don't know it's there.
 
 0.22 - Wed Apr  9 16:05:08 2003 (Andy Lester)
 	* release will not run if there are any switch errors

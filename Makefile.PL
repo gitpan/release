@@ -1,29 +1,36 @@
-# $Id: Makefile.PL,v 1.11 2003/03/29 21:48:17 petdance Exp $
+# $Id: Makefile.PL,v 1.13 2004/12/17 21:27:18 petdance Exp $
 use ExtUtils::MakeMaker;
 
-eval "use Test::Pod 0.95";
+eval "use Test::Manifest";
+unless( $@ )
+   {
+   * ExtUtils::MM_Any::test_via_harness = sub
+	   {
+	   my($self, $perl, $tests) = @_;
 
-if ( $@ ) {
-    warn "Test::Pod 0.95 is not installed on your machine, so we'll skip the POD tests.\n";
-}
-
+	   return qq|\t$perl "-MTest::Manifest" | .
+				  qq|"-e" "run_t_manifest(\$(TEST_VERBOSE), '\$(INST_LIB)', | .
+				  qq|'\$(INST_ARCHLIB)')"\n|;
+	   }
+   }
+	   
 WriteMakefile(
-	'NAME'	    => 'release',
-	'VERSION_FROM' => "lib/Module/Release.pm",
+	'NAME'	       => 'release',
+	'VERSION_FROM' => "lib/Release.pm",
 	
 	'EXE_FILES' =>  [ 'release' ],
 	    	
 	'PREREQ_PM' => {
  		'ConfigReader::Simple' => 0,
- 		'Test::More'           => 0,
-		'Config'               => 0,
-		'CGI'                  => 0,
-		'LWP::UserAgent'       => 0,
-		'HTTP::Cookies'        => 0,
-		'HTTP::Request'        => 0,
 		'Net::FTP'             => 0,
-		'File::Spec'           => 0,
 	},
+
+	'PM' => {
+        'lib/Release.pm'  => '$(INST_LIBDIR)/Module/Release.pm',
+        'lib/Registry.pm' => '$(INST_LIBDIR)/Module/Release/Registry.pm',
+        'lib/CVS.pm'      => '$(INST_LIBDIR)/Module/Release/CVS.pm',
+        'lib/UsePerl.pm'  => '$(INST_LIBDIR)/Module/Release/UsePerl.pm',
+    },
 
 	'MAN1PODS' => {
 		'release' => '$(INST_MAN1DIR)/release.1',

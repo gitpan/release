@@ -1,0 +1,5 @@
+load.t
+compile.t
+pod.t
+registry.t
+#make_cvs_tag.t

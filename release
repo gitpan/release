@@ -1,5 +1,5 @@
 #!/usr/bin/perl
-# $Id: release,v 1.43 2003/04/09 21:05:48 petdance Exp $
+# $Id: release,v 1.45 2003/11/07 04:47:19 petdance Exp $
 
 =head1 NAME
 
@@ -179,8 +179,11 @@ make; otherwise, the perl used to run release will be used.
 
 =head1 TO DO
 
-* check make disttest (to catch MANIFEST errors) -- needs error
-catching and reporting
+=over 4
+
+=item * check make disttest (to catch MANIFEST errors) -- needs error catching and reporting
+
+=back
 
 =head1 SOURCE AVAILABILITY
 
@@ -194,7 +197,8 @@ members of the project can shepherd this software appropriately.
 
 =head1 AUTHOR
 
-brian d foy, E<lt>bdfoy@cpan.orgE<gt>
+brian d foy, C<< <bdfoy@cpan.org> >> and
+Andy Lester, C<< <andy@petdance.com> >>
 
 =head1 COPYRIGHT
 
@@ -247,6 +251,7 @@ if (@ARGV) {
 $params{debug} = 1 if $opts{d};
 
 my $r = Module::Release->new(%params);
+warn "release, based on Module::Release $Module::Release::VERSION\n" if $params{debug};
 
 $r->clean;
 $r->build_makefile;

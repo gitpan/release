@@ -2,22 +2,23 @@ package Module::Release;
 
 =head1 NAME
 
-Module::Release - Methods for releasing packages to CPAN and SourceForge.
+Module::Release - Methods for releasing packages
 
 =head1 SYNOPSIS
 
-Right now, there are no user-servicable parts inside.  However, this
-has been split out like this so that there can be in the future.
+	use Module::Release;
 
 =head1 VERSION
 
-Version 0.22
+Version 0.25
 
-    $Header: /cvsroot/brian-d-foy/release/lib/Module/Release.pm,v 1.19 2003/06/23 04:44:16 petdance Exp $
+    $Header: /cvsroot/brian-d-foy/release/lib/Release.pm,v 1.3 2004/12/17 21:54:48 petdance Exp $
+
+=over 4
 
 =cut
 
-our $VERSION = '0.23';
+our $VERSION = '0.25';
 
 use strict;
 use Config;
@@ -28,9 +29,34 @@ use HTTP::Cookies;
 use HTTP::Request;
 use Net::FTP;
 use File::Spec;
-
+use Carp;
 use constant DASHES => "-" x 73;
 
+
+sub _resolve_method
+	{
+	my $self   = shift;
+	my $method = shift;
+	
+	my( $key, $name ) = split /_/, $method, 2;
+	
+	my $plugin = $self->get_plugin( lc $key ) ;
+
+	return $plugin unless $plugin == 1;
+	
+	return ( $plugin, $name );
+	}
+	
+sub _call_method
+	{
+	my $self = shift;
+	my ( $plugin, $name, @args ) = @_;
+	
+	"$plugin::$name"->( $self, @args );
+	}
+
+=back
+		
 =head2 C<new()>
 
 Create a Module::Release object.  Any arguments passed are assumed to
@@ -225,66 +251,6 @@ sub dist_test {
     print "all tests pass\n";
 } # dist_test
 
-=head2 C<check_cvs()>
-
-Check the state of the CVS repository
-
-=cut
-
-sub check_cvs {
-    my $self = shift;
-    return unless -d 'CVS';
-
-    print "Checking state of CVS... ";
-
-    my $cvs_update = $self->run( "cvs -n update 2>&1" );
-
-    if( $? )
-            {
-            die sprintf("\nERROR: cvs failed with non-zero exit status: %d\n\n" .
-                    "Aborting release\n", $? >> 8);
-            }
-
-    my %message    = (
-            C   => 'These files have conflicts',
-            M   => 'These files have not been checked in',
-            U   => 'These files need to be updated',
-            P   => 'These files need to be patched',
-            A   => 'These files were added but not checked in',
-            '?' => q|I don't know about these files|,
-            );
-    my @cvs_states = keys %message;
-
-    my %cvs_state;
-    foreach my $state ( @cvs_states ) {
-        $cvs_state{$state} = [ $cvs_update =~ /^\Q$state\E (.+)/m ];
-    }
-
-    my $rule = "-" x 50;
-    my $count;
-    my $question_count;
-
-    foreach my $key ( sort keys %cvs_state ) {
-            my $list = $cvs_state{$key};
-            next unless @$list;
-            $count += @$list unless $key eq '?';
-            $question_count += @$list if $key eq '?';
-
-	    local $" = "\n\t";
-            print "\n\t$message{$key}\n\t$rule\n\t@$list\n";
-            }
-
-    die "\nERROR: CVS is not up-to-date ($count files): Can't release files\n"
-            if $count;
-
-    if( $question_count ) {
-            print "\nWARNING: CVS is not up-to-date ($question_count files unknown); ",
-                    "continue anwyay? [Ny] " ;
-            die "Exiting\n" unless <> =~ /^[yY]/;
-    }
-
-    print "CVS up-to-date\n";
-} # cvs
 
 =head2 C<check_for_passwords()>
 
@@ -393,182 +359,6 @@ sub pause_claim {
             $response->as_string =~ /Query succeeded/ ? "successful" : 'failed',
             "\n";
 } # pause_claim
-
-=head2 C<cvs_tag()>
-
-Tag the release in local CVS
-
-=cut
-
-sub cvs_tag {
-    my $self = shift;
-    return unless -d 'CVS';
-
-    my $tag = $self->make_cvs_tag;
-    print "Tagging release with $tag\n";
-
-    system 'cvs', 'tag', $tag;
-
-    if ( $? ) {
-            # already uploaded, and tagging is not (?) essential, so warn, don't die
-            warn sprintf(
-                    "\nWARNING: cvs failed with non-zero exit status: %d\n",
-                    $? >> 8
-            );
-    }
-
-} # cvs_tag
-
-=head2 C<make_cvs_tag()>
-
-By default, examines the name of the remote file
-(i.e. F<Foo-Bar-0.04.tar.gz>) and constructs a CVS tag like
-C<RELEASE_0_04> from it.  Override this method if you want to use a
-different tagging scheme.
-
-=cut
-
-sub make_cvs_tag {
-    my $self = shift;
-    my( $major, $minor ) = $self->{remote} =~ /(\d+) \. (\d+(?:_\d+)?) (?:\. tar \. gz)? $/xg;
-    return "RELEASE_${major}_${minor}";
-}
-
-# SourceForge.net seems to know our path through the system
-# Hit all the pages, collect the right cookies, etc
-
-=head2 C<sf_login()>
-
-Authenticate with Sourceforge
-
-=cut
-
-sub sf_login {
-    my $self = shift;
-    return unless $self->{sf};
-
-    print "Logging in to SourceForge.net... ";
-
-    my $cgi = CGI->new();
-    my $request = HTTP::Request->new( POST =>
-        'https://sourceforge.net/account/login.php' );
-    $self->{cookies}->add_cookie_header( $request );
-
-    $cgi->param( 'return_to', '' );
-    $cgi->param( 'form_loginname', $self->{config}->sf_user );
-    $cgi->param( 'form_pw', $self->{sf_pass} );
-    $cgi->param( 'stay_in_ssl', 1 );
-    $cgi->param( 'login', 'Login With SSL' );
-
-    $request->content_type('application/x-www-form-urlencoded');
-    $request->content( $cgi->query_string );
-
-    $request->header( "Referer", "http://sourceforge.net/account/login.php" );
-
-    print $request->as_string, DASHES, "\n" if $self->{debug};
-
-    my $ua = $self->{ua};
-    my $response = $ua->request( $request );
-    $self->{cookies}->extract_cookies( $response );
-
-    print $response->headers_as_string, DASHES, "\n" if $self->{debug};
-
-    if( $response->code == 302 ) {
-        my $location = $response->header('Location');
-        print "Location is $location\n" if $self->{debug};
-        my $request = HTTP::Request->new( GET => $location );
-        $self->{cookies}->add_cookie_header( $request );
-        print $request->as_string, DASHES, "\n" if $self->{debug};
-        $response = $ua->request( $request );
-        print $response->headers_as_string, DASHES, "\n" if $self->{debug};
-        $self->{cookies}->extract_cookies( $response );
-    }
-
-    my $content = $response->content;
-    $content =~ s|.*<!-- begin SF.net content -->||s;
-    $content =~ s|Register New Project.*||s;
-
-    print $content if $self->{debug};
-
-    my $sf_user = $self->{config}->sf_user;
-    if( $content =~ m/welcomes.*$sf_user/i ) {
-        print "Logged in!\n";
-    } else {
-        print "Not logged in! Aborting\n";
-        exit;
-    }
-} # sf_login
-
-=head2 C<sf_qrs()>
-
-Visit the Quick Release System form
-
-=cut
-
-sub sf_qrs {
-    my $self = shift;
-    return unless $self->{sf};
-
-    my $request = HTTP::Request->new( GET =>
-        'https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=' . $self->{config}->sf_group_id
-    );
-    $self->{cookies}->add_cookie_header( $request );
-    print $request->as_string, DASHES, "\n" if $self->{debug};
-    my $response = $self->{ua}->request( $request );
-    print $response->headers_as_string,  DASHES, "\n" if $self->{debug};
-    $self->{cookies}->extract_cookies( $response );
-} # sf_qrs
-
-=head2 C<sf_release()>
-
-Release the file
-
-=cut
-
-sub sf_release {
-    my $self = shift;
-    return unless $self->{sf};
-
-    my @time = localtime();
-    my $date = sprintf "%04d-%02d-%02d", $time[5] + 1900, $time[4] + 1, $time[3];
-
-    print "Connecting to SourceForge.net QRS... ";
-    my $cgi = CGI->new();
-    my $request = HTTP::Request->new( POST => 'https://sourceforge.net/project/admin/qrs.php' );
-    $self->{cookies}->add_cookie_header( $request );
-
-    $cgi->param( 'MAX_FILE_SIZE', 1000000 );
-    $cgi->param( 'package_id', $self->{config}->sf_package_id  );
-    $cgi->param( 'release_name', $self->{release} );
-    $cgi->param( 'release_date',  $date );
-    $cgi->param( 'status_id', 1 );
-    $cgi->param( 'file_name',  $self->{remote} );
-    $cgi->param( 'type_id', $self->{config}->sf_type_id || 5002 );
-    $cgi->param( 'processor_id', $self->{config}->sf_processor_id || 8000 );
-    $cgi->param( 'release_notes', get_readme() );
-    $cgi->param( 'release_changes', get_changes() );
-    $cgi->param( 'group_id', $self->{config}->sf_group_id );
-    $cgi->param( 'preformatted', 1 );
-    $cgi->param( 'submit', 'Release File' );
-
-    $request->content_type('application/x-www-form-urlencoded');
-    $request->content( $cgi->query_string );
-
-    $request->header( "Referer",
-        "https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=" . $self->{config}->sf_group_id
-    );
-    print $request->as_string, "\n", DASHES, "\n" if $self->{debug};
-
-    my $response = $self->{ua}->request( $request );
-    print $response->headers_as_string, "\n", DASHES, "\n" if $self->{debug};
-
-    my $content = $response->content;
-    $content =~ s|.*Database Admin.*?<H3><FONT.*?>\s*||s;
-    $content =~ s|\s*</FONT></H3>.*||s;
-
-    print "$content\n" if $self->{debug};
-    print "File Released\n";
-} # sf_release
 
 =head2 C<get_readme()>
 
