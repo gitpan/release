@@ -1,4 +1,9 @@
-$Id: Changes,v 1.9 2003/03/12 16:10:44 petdance Exp $
+$Id: Changes,v 1.11 2003/03/14 17:24:38 petdance Exp $
+
+0.15 - Fri Mar 14 17:23:30 2003 (Andy Lester)
+	* Support for the PERL environment variable.
+	* Cleaned up tabs 'n' spaces in the source.  Shouldn't
+	  affect anything in how you use the program.
 
 0.14 - Wed Mar 12 10:09:00 2003 (Andy Lester)
 	* 0.13 is an incorrect distro.  This is what you want.
