@@ -1,5 +1,5 @@
-# $Id: pod.t,v 1.1 2002/12/11 22:31:58 comdog Exp $
+# $Id: pod.t,v 1.2 2003/03/06 19:53:44 petdance Exp $
 
 use Test::Pod tests => 1;
 
-pod_ok('blib/script/release');
+pod_file_ok('blib/script/release');

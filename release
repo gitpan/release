@@ -1,36 +1,60 @@
 #!/usr/bin/perl
-# $Id: release,v 1.21 2003/03/03 18:05:12 petdance Exp $
+# $Id: release,v 1.24 2003/03/06 19:56:59 petdance Exp $
 use strict;
-
-use lib qw(/usr/local/src/cpan/build/Crypt-SSLeay-0.45/lib);
 
 use CGI qw(-oldstyle_urls);
 use ConfigReader::Simple;
+use Getopt::Std;
 use LWP::UserAgent;
 use HTTP::Cookies;
 use HTTP::Request;
 use Net::FTP;
 
+my %opts;
+getopts('hdt', \%opts);
+
+if ($opts{h}) {
+	print <<"USAGE";
+
+Usage: release -hdt [ LOCAL_FILE REMOTE_FILE ]
+
+Will upload current release LOCAL_FILE, naming it REMOTE_FILE.  Will
+get LOCAL_FILE and REMOTE_FILE automatically (using same name for both)
+if not supplied.
+
+  -h   This help
+  -d   Print extra debugging information
+  -t   Just make and test distribution, don't tag/upload
+
+The program works in the current directory, and looks for a .releaserc
+file and the environment for its preferences.  See `man release`, or
+`perldoc $0`, for more information.
+
+USAGE
+	exit();
+}
+
 my $Conf  = '.releaserc';
-my $Debug = $ENV{RELEASE_DEBUG} || 0;
+my $Debug = $ENV{RELEASE_DEBUG} || $opts{d} || 0;
 
 my $local  = $ARGV[0];
 my $remote = $ARGV[1] || $ARGV[0];
 
 =head1 NAME
 
-release - upload files to CPAN and SourceForge
+release - upload files to the CPAN and SourceForge.net
 
 =head1 SYNOPSIS
 
-release LOCAL_FILE [ REMOTE_FILE ]
+release [ LOCAL_FILE REMOTE_FILE ]
 
 =head1 DESCRIPTION
 
-This program automates Perl module releases.  It uploads the
-module distribution to the PAUSE anonymous FTP directory, then
-uploads it to your CPAN account.  The script also uploads the
-file to the incoming directory for SourceForge.
+This program automates Perl module releases.  It makes the distribution,
+tests it, checks that CVS is up to date, tags CVS, uploads it to
+the PAUSE anonymous FTP directory and to the incoming directory for
+SourceForge.net, claims it on PAUSE for your CPAN account, and releases
+it on SourceForge.net.
 
 =head2 Process
 
@@ -46,20 +70,27 @@ Look in the current working directory for C<.releaserc>.  See
 the Configuration section.  If release cannot find the
 configuration file, it dies.
 
+=item Test and make the distribution
+
+Run make realclean, perl Makefile.PL, make test, make tardist, make
+disttest.  If testing fails, release dies.  make dist provides the name
+of the distribution if LOCAL_FILE is not provided on the command line.
+
 =item Check that CVS is up-to-date
 
 You can release a file without CVS being up-to-date, but this
 script also tags the repository with the version number of the
 release, so it insists on CVS being up-to-date.  It fails otherwise.
 
-=item Upload to PAUSE and SourceForge
+=item Upload to PAUSE and SourceForge.net
 
 Simply drop the distribution in the incoming/ directory of these
 servers.
 
 =item Claim the file on PAUSE
 
-Connect to the PAUSE web thingy and claim the uploaded file
+Connect to the PAUSE web thingy and claim the uploaded file for your
+CPAN account.
 
 =item Tag the repository
 
@@ -67,10 +98,10 @@ Use the version number (in the distribution name) to tag
 the repository.  You should be able to checkout the code
 from any release.
 
-=item Release to SourceForge
+=item Release to SourceForge.net
 
 The release name is the distribution name without the .tar.gz.
-The file name is the distribution name.  SourceForge divides
+The file name is the distribution name.  SourceForge.net divides
 things into projects (with project IDs) and packages within
 the project (with package IDs).  Specify these in the
 configuration file.
@@ -80,49 +111,72 @@ configuration file.
 =head2 Configuration
 
 The release script uses a configuration file in the current
-working directory.  The file name is C<.releaserc>.  Although
+working directory.  The file name is F<.releaserc>.  Although
 most of the information is the same for all of your projects,
 the sf_package_id is probably different.  You can get the
 sf_package_id from the data in the Quick Release Form.
+
+release's own F<.releaserc> looks like this:
+
+    sf_user petdance
+    sf_group_id 36221
+    sf_package_id 56559
+    cpan_user PETDANCE
 
 =over 4
 
 =item cpan_user
 
+=item sf_user
+
 =item sf_group_id
 
 =item sf_package_id
 
-=item sf_user
+=item sf_processor_id
+
+=item sf_type_id
+
+=item sf_release_match
+
+=item sf_release_replace
 
 =back
 
+If C<cpan_user> or C<sf_user> is set to C<< <none> >>, the program will
+skip releasing for that system.  You must release for at least one system.
+
+C<sf_processor_id> and C<sf_type_id> are optional, and default to "Any"
+and "Source .gz".  See the HTML in a file release form on SourceForge.net
+for other options.
+
+C<sf_release_match> and C<sf_release_replace> are for defining the release
+name, if you don't like the default.  For example, the default would
+set the name for this program to something like "release-0.10".
+But if you want the name to be only the version number, set
+C<sf_release_match=^.+-([\d.]+)$> and C<sf_release_replace=$1>.
+
 =head2 Environment
 
-release reads the CPAN_PASS AND SF_PASS environment variables to set
-the passwords for PAUSE and SourceForge.  The script will exit if you
-do not set them.
+release reads the C<CPAN_PASS> and C<SF_PASS> environment variables to
+set the passwords for PAUSE and SourceForge.net, respectively.  Of course,
+you don't need to set the password for a system you're not uploading to.
 
-The RELEASE_DEBUG environment variable sets the debugging value, which
-is 0 by default.  Set RELEASE_DEBUG to a true value to get debugging
+The C<RELEASE_DEBUG> environment variable sets the debugging value, which
+is 0 by default.  Set C<RELEASE_DEBUG> to a true value to get debugging
 output.
 
 =head1 TO DO
 
-* make dist should also set the release name (so no command line
-args!)
-
 * check make disttest (to catch MANIFEST errors) -- needs error
 catching and reporting
 
-* SF - make processor type and file type configurable
-
 =head1 SOURCE AVAILABILITY
 
-This source is part of a SourceForge project which always has the
+This source is part of a SourceForge.net project which always has the
 latest sources in CVS, as well as all of the previous releases.
 
-	https://sourceforge.net/projects/brian-d-foy/
+	http://sourceforge.net/projects/brian-d-foy/
 
 If, for some reason, I disappear from the world, one of the other
 members of the project can shepherd this software appropriately.
@@ -133,30 +187,66 @@ brian d foy, E<lt>bdfoy@cpan.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright 2002, brian d foy, All rights reserved.
+Copyright 2002-2003, brian d foy, All rights reserved.
 
 You may use this software under the same terms as Perl itself.
 
 =cut
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# make sure we have the right passwords
-foreach my $key ( qw(CPAN_PASS SF_PASS) )
+# read the configuration
+die "Could not find $Conf file\n" unless -e $Conf;
+my $config  = ConfigReader::Simple->new( $Conf );
+die "Could not get configuration data\n" unless ref $config;
+
+my $cpan = $config->cpan_user eq '<none>' ? 0 : 1;
+my $sf   = $config->sf_user   eq '<none>' ? 0 : 1;
+
+my @required = qw( sf_user cpan_user );
+push( @required, qw( sf_group_id sf_package_id ) ) if $sf;
+
+my $ok = 1;
+for( qw( cpan_user sf_user sf_group_id sf_package_id ) ) {
+	unless ( length $config->$_ ) {
+		$ok = 0;  
+		print "Missing configuration data: $_; Aborting!\n";
+	}
+}
+exit unless $ok;
+
+if( !$cpan && !$sf )
 	{
-	unless( exists $ENV{$key} and defined $ENV{$key} )
-		{
-		print "$key not set! Aborting!\n";
-		exit;
-		}
+	print "Must upload to the CPAN or SourceForge.net; Aborting!\n";
+	exit;
+	}
+elsif( !$cpan )
+	{
+	print "Uploading to SourceForge.net only\n";
+	}
+elsif( !$sf )
+	{
+	print "Uploading to the CPAN only\n";
 	}
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# read the configuration
-my $config  = ConfigReader::Simple->new( $Conf );
-die "Could not get configuration data\n" unless ref $config;
-for (qw( cpan_user sf_user sf_group_id sf_package_id )) {
-	die "Missing configuration data: $_\n" unless length $config->$_;
-}
+# make sure we have the right passwords
+if( $cpan )
+	{
+	unless( exists $ENV{CPAN_PASS} and defined $ENV{CPAN_PASS} )
+		{
+		print "\$ENV{CPAN_PASS} not set! Aborting!\n";
+		exit;
+		}
+	}
+	
+if( $sf )
+	{
+	unless( exists $ENV{SF_PASS} and defined $ENV{SF_PASS} )
+		{
+		print "\$ENV{SF_PASS} not set! Aborting!\n";
+		exit;
+		}
+	}
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # set up the globals
@@ -181,6 +271,8 @@ unless( -e 'Makefile' )
 my $messages = `make realclean 2>&1`;
 
 print "done\n";
+
+print $messages, "-" x 73, "\n" if $Debug;
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -197,7 +289,9 @@ unless( -e 'Makefile.PL' )
 my $messages = `perl Makefile.PL 2>&1`;
 
 print "done\n";
-};
+
+print $messages, "-" x 73, "\n" if $Debug;
+}
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # check the tests, which must all pass
@@ -216,6 +310,8 @@ die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
 	unless $tests =~ /All tests successful/;
 
 print "all tests pass\n";
+
+print $tests, "-" x 73, "\n" if $Debug;
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -231,7 +327,7 @@ unless( -e 'Makefile.PL' )
 
 my $messages = `make tardist 2>&1`;
 
-if (!$local)
+unless( $local )
 	{
 	($local) = $messages =~ /^gzip.+?\b(\S+\.tar)$/m;
 	$local .= '.gz';
@@ -239,6 +335,8 @@ if (!$local)
 	}
 
 print "done\n";
+
+print $messages, "-" x 73, "\n" if $Debug;
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -258,6 +356,8 @@ die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
 	unless $tests =~ /All tests successful/;
 
 print "all tests pass\n";
+
+print $tests, "-" x 73, "\n" if $Debug;
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -267,16 +367,23 @@ last CVS unless -d 'CVS';
 
 print "Checking state of CVS... ";
 
-my @cvs_update = `cvs update 2>&1`;
+my @cvs_update = `cvs -n update 2>&1`;
 chomp( @cvs_update );
+
+if( $? )
+	{
+	print join("\n", @cvs_update, "\n"), "-" x 73, "\n" if $Debug;
+	die sprintf("\nERROR: cvs failed with non-zero exit status: %d\n\n" .
+		"Aborting release\n", $? >> 8);
+	}
 
 my @cvs_states = qw( C M U P A ? );
 my %cvs_state;
 my %message    = (
 	C   => 'These files have conflicts',
 	M   => 'These files have not been checked in',
-	U   => 'These files need to be, and have been, updated',
-	P   => 'These files need to be, and have been, patched',
+	U   => 'These files need to be updated',
+	P   => 'These files need to be patched',
 	A   => 'These files were added but not checked in',
 	'?' => q|I don't know about these files|,
 	);
@@ -309,29 +416,42 @@ foreach my $key ( sort keys %cvs_state )
 die "\nERROR: CVS is not up-to-date ($count files): Can't release files\n"
 	if $count;
 
-if ($question_count) {
+if( $question_count ) {
 	print "\nWARNING: CVS is not up-to-date ($question_count files unknown); ",
-	      "continue anwyay? [Ny] " ;
+		"continue anwyay? [Ny] " ;
 	die "Exiting\n" unless <> =~ /^[yY]/;
 }
 
 print "CVS up-to-date\n";
-}
 
-# exit if $Debug;
+print join("\n", @cvs_update, "\n"), "-" x 73, "\n" if $Debug;
+}
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # upload the files to the FTP servers
 
-my @Sites = qw(pause.perl.org upload.sourceforge.net);
+my @Sites;
+push @Sites, 'pause.perl.org' if $cpan;
+push @Sites, 'upload.sourceforge.net' if $sf;
 
 my( $release ) = $remote =~ m/^(.*?)(?:\.tar\.gz)?$/g;
+
+# set your own release name if you want to ...
+if( $config->sf_release_match && $config->sf_release_replace )
+	{
+	my $match   = $config->sf_release_match;
+	my $replace = $config->sf_release_replace;
+	$release =~ s/$match/$replace/ee;
+	}
+
 print "Release name is $release\n";
+
+exit if $opts{t};
 
 foreach my $site ( @Sites )
 	{
 	print "Uploading to $site\n";
-	my $ftp = Net::FTP->new( $site, Debug => $config->debug );
+	my $ftp = Net::FTP->new( $site, Debug => $Debug );
 
 	$ftp->login( "anonymous", $config->cpan_user . '@cpan.org' );
 	$ftp->binary;
@@ -343,7 +463,9 @@ foreach my $site ( @Sites )
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # claim the file in PAUSE
-{
+PAUSE_CLAIM: {
+last PAUSE_CLAIM unless $cpan;
+
 my $cgi = CGI->new();
 my $ua  = LWP::UserAgent->new();
 
@@ -376,19 +498,31 @@ my $tag = "RELEASE_${major}_$minor";
 print "Tagging release with $tag\n";
 
 system 'cvs', 'tag', $tag;
+
+if( $? )
+	{
+	# already uploaded, and tagging is not (?) essential, so warn, don't die
+	warn sprintf(
+		"\nWARNING: cvs failed with non-zero exit status: %d\n",
+		$? >> 8
+	);
+	}
+
 }
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-# Do the SourceForge stuff
+# Do the SourceForge.net stuff
 
-# SourceForge seems to know our path through the system
+# SourceForge.net seems to know our path through the system
 # Hit all the pages, collect the right cookies, etc
 
 ########################################################################
 # authenticate
 SF_LOGIN: {
-print "Logging in to SourceForge... ";
+last SF_LOGIN unless $sf;
+
+print "Logging in to SourceForge.net... ";
 
 my $cgi = CGI->new();
 my $request = HTTP::Request->new( POST =>
@@ -446,7 +580,9 @@ else
 
 ########################################################################
 # visit the Quick Release System form
-{
+SF_QRS: {
+last SF_QRS unless $sf;
+
 my $request = HTTP::Request->new( GET =>
 	'https://sourceforge.net/project/admin/qrs.php?package_id=&group_id=' . $config->sf_group_id
 	);
@@ -459,11 +595,13 @@ $cookies->extract_cookies( $response );
 
 ########################################################################
 # release the file
-{
+SF_RELEASE: {
+last SF_RELEASE unless $sf;
+
 my @time = localtime();
 my $date = sprintf "%04d-%02d-%02d", $time[5] + 1900, $time[4] + 1, $time[3];
 
-print "Connecting to SourceForge QRS... ";
+print "Connecting to SourceForge.net QRS... ";
 my $cgi = CGI->new();
 my $request = HTTP::Request->new( POST =>
     'https://sourceforge.net/project/admin/qrs.php' );

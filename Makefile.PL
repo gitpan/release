@@ -1,16 +1,16 @@
-# $Id: Makefile.PL,v 1.3 2003/03/03 17:47:51 petdance Exp $
+# $Id: Makefile.PL,v 1.5 2003/03/06 19:57:55 petdance Exp $
 use ExtUtils::MakeMaker;
 
 WriteMakefile(
 	'NAME'	    => 'release',
-	'VERSION'   => '0.11',
+	'VERSION'   => '0.12',
 	
 	'EXE_FILES' =>  [ 'release' ],
 	    	
 	'PREREQ_PM' => {
  		'ConfigReader::Simple' => '0',
  		'Test::More'           => '0',
- 		'Test::Pod'            => '0.90'
+ 		'Test::Pod'            => '0.95'
 	},
 
 	'MAN1PODS' => {
