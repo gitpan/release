@@ -1,5 +1,11 @@
-# $Id: pod.t,v 1.2 2003/03/06 19:53:44 petdance Exp $
+# $Id: pod.t,v 1.3 2003/03/19 21:40:24 petdance Exp $
 
-use Test::Pod tests => 1;
+use Test::More tests => 1;
 
-pod_file_ok('blib/script/release');
+
+SKIP: {
+    eval "use Test::Pod;";
+    skip "Test::Pod not installed", 1 if $@;
+    pod_file_ok('blib/script/release');
+}
+
