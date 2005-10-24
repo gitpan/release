@@ -8,3 +8,4 @@ t/load.t
 t/make_cvs_tag.t
 lib/Module/Release.pm
 release
+META.yml                                 Module meta-data (added by MakeMaker)

@@ -6,18 +6,12 @@ Module::Release - Methods for releasing packages to CPAN and SourceForge.
 
 =head1 SYNOPSIS
 
-Right now, there are no user-servicable parts inside.  However, this
-has been split out like this so that there can be in the future.
-
-=head1 VERSION
-
-Version 0.22
-
-    $Header: /cvsroot/brian-d-foy/release/lib/Module/Release.pm,v 1.21 2003/11/29 15:21:55 comdog Exp $
+See the release(1) script (included with this distribution) for an example
+of the use of this module.
 
 =cut
 
-our $VERSION = '0.24';
+our $VERSION = '1.01';
 
 use strict;
 use Config;
@@ -98,7 +92,10 @@ sub new {
   
 
     # Set up the browser
-    $self->{ua}      = LWP::UserAgent->new( agent => 'Mozilla/4.5' );
+    $self->{ua}      = LWP::UserAgent->new( 
+    	agent        => 'Mozilla/4.5',
+    	max_redirect => 0
+    	);
     $self->{cookies} = HTTP::Cookies->new(
 					    file           => ".lwpcookies",
 					    hide_cookie2   => 1,
@@ -164,6 +161,8 @@ sub test {
         return;
     }
 
+	# sometimes make test doesn't run exactly as make would, so do make first
+	$self->run( "$self->{make} 2>&1" );
     my $tests = $self->run( "$self->{make} test 2>&1" );
 
     die "\nERROR: Tests failed!\n$tests\n\nAborting release\n"
@@ -473,8 +472,10 @@ sub sf_login {
 
     print $response->headers_as_string, DASHES, "\n" if $self->{debug};
 
-    if( $response->code == 302 ) {
-        my $location = $response->header('Location');
+	my $attempts = 0;
+	while( $response->code == 302 ) {
+		last if ++$attempts > 2;
+		my $location = $response->header('Location');
         print "Location is $location\n" if $self->{debug};
         my $request = HTTP::Request->new( GET => $location );
         $self->{cookies}->add_cookie_header( $request );
@@ -482,7 +483,7 @@ sub sf_login {
         $response = $ua->request( $request );
         print $response->headers_as_string, DASHES, "\n" if $self->{debug};
         $self->{cookies}->extract_cookies( $response );
-    }
+		}
 
     my $content = $response->content;
     $content =~ s|.*<!-- begin SF.net content -->||s;

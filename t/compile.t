@@ -6,6 +6,6 @@ my $file = 'blib/script/release';
 
 print "bail out! Script file is missing!" unless ok( -e $file, "File exists" );
 
-my $output = `perl -c $file 2>&1`;
+my $output = `$^X -c $file 2>&1`;
 
 like( $output, qr/syntax OK$/, 'script compiles' );

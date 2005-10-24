@@ -7,7 +7,7 @@ BEGIN {
 use Test::More tests=>(scalar keys %tags) + 2;
 
 use_ok( 'Module::Release' );
-my $r = new Module::Release;
+my $r = Module::Release->new();
 isa_ok( $r, 'Module::Release' );
 
 while ( my($file,$tag) = each %tags ) {
