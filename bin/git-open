@@ -1,0 +1,8 @@
+#!/usr/bin/perl
+use Git::Open;
+
+# PODNAME: git-open
+# ABSTRACT: wrapper for Git::Open
+
+my $app = Git::Open->new_with_options;
+$app->run();
